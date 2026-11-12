@@ -1,0 +1,55 @@
+:root {
+  --cream: #fbf4ea;
+  --ink: #4a3b33;
+  --stitch: #c9a98a;
+  --accent: #e8798a;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; overflow: hidden; background: #f3e9dc; color: var(--ink);
+  font-family: "Microsoft JhengHei", "PingFang TC", system-ui, sans-serif; }
+#app { position: fixed; inset: 0; }
+#app canvas { display: block; }
+
+.panel, #hud, #toolbar .tool, #selPanel, #help {
+  background: var(--cream);
+  border: 2px dashed var(--stitch); /* 縫線邊框 */
+  border-radius: 14px;
+  box-shadow: 0 3px 0 #d8c3ab, 0 6px 16px #0002;
+}
+
+#hud { position: fixed; top: 10px; left: 50%; transform: translateX(-50%); padding: 6px 16px;
+  font-size: 16px; display: flex; gap: 14px; align-items: center; white-space: nowrap; }
+#hud b { color: #b0455a; }
+#hNext { font-size: 13px; opacity: .7; }
+
+#stats { position: fixed; top: 10px; left: 10px; font: 12px/1.5 Consolas, monospace; white-space: pre;
+  background: #0007; color: #fff; padding: 6px 9px; border-radius: 8px; pointer-events: none; }
+
+#toolbar { position: fixed; bottom: 12px; left: 50%; transform: translateX(-50%); display: flex; gap: 8px; }
+#toolbar .tool { position: relative; width: 74px; height: 78px; padding: 4px; cursor: pointer; color: var(--ink);
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 1px; font: inherit; }
+#toolbar .tool:hover { transform: translateY(-2px); }
+#toolbar .tool.on { border-color: var(--accent); border-style: solid; background: #fff; }
+#toolbar .tool.poor { opacity: .5; }
+#toolbar .tool.debug { background: #eef3fb; }
+#toolbar .ico { font-size: 24px; }
+#toolbar .lbl { font-size: 12px; }
+#toolbar .cost { font-size: 11px; color: #a06a10; }
+#toolbar .key { position: absolute; top: 2px; right: 6px; font-size: 10px; opacity: .5; }
+
+#selPanel { position: fixed; right: 12px; bottom: 12px; width: 220px; padding: 10px 12px; display: none; font-size: 14px; line-height: 1.5; }
+#selPanel .row { display: flex; gap: 6px; margin-top: 8px; flex-wrap: wrap; }
+#selPanel button { font: inherit; font-size: 13px; padding: 4px 8px; border-radius: 8px; border: 2px solid var(--stitch);
+  background: #fff; color: var(--ink); cursor: pointer; }
+#selPanel button:disabled { opacity: .45; cursor: not-allowed; }
+#selPanel button.on { border-color: var(--accent); }
+
+#help { position: fixed; left: 10px; bottom: 12px; font-size: 12px; padding: 6px 10px; max-width: 260px; line-height: 1.6; opacity: .9; }
+
+#over { position: fixed; inset: 0; display: none; flex-direction: column; align-items: center; justify-content: center;
+  gap: 16px; background: #0006; font-size: 28px; color: #fff; }
+#over button { font: inherit; font-size: 18px; padding: 8px 20px; border-radius: 12px; border: 2px dashed var(--stitch);
+  background: var(--cream); color: var(--ink); cursor: pointer; }
+
+.lil-gui.root { top: 10px !important; right: 10px !important; }
+@media (max-width: 1250px) { #help { display: none; } }

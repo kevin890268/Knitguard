@@ -1,0 +1,578 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<title>隨機塔防</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<style>
+  *{box-sizing:border-box}
+  body{margin:0;background:#1b1e24;color:#e8e8e8;font-family:"Microsoft JhengHei",system-ui,sans-serif;display:flex;justify-content:center;padding:10px}
+  #wrap{display:flex;gap:10px;flex-wrap:wrap;justify-content:center;max-width:1240px}
+  #cv{background:#2d5a2d;border-radius:8px;width:960px;max-width:100%;height:auto;cursor:crosshair;touch-action:none}
+  #side{width:250px;display:flex;flex-direction:column;gap:8px}
+  .box{background:#272b33;border-radius:8px;padding:10px}
+  .stats{display:flex;justify-content:space-between;font-size:16px;font-weight:bold}
+  button{font:inherit;color:inherit;background:#3a4150;border:1px solid #555d70;border-radius:6px;padding:6px 8px;cursor:pointer;text-align:left}
+  button:hover:not(:disabled){background:#48516a}
+  button:disabled{opacity:.45;cursor:not-allowed}
+  button.on{outline:2px solid #ffd54a}
+  #build{display:grid;grid-template-columns:1fr;gap:5px}
+  #build small{opacity:.7;display:block}
+  h3{margin:0 0 6px;font-size:14px;opacity:.8}
+  .row{display:flex;gap:5px;flex-wrap:wrap}
+  #info{font-size:13px;line-height:1.55;min-height:74px}
+  #ov{position:absolute;inset:0;display:none;align-items:center;justify-content:center;flex-direction:column;background:#000a;font-size:32px;gap:14px;border-radius:8px}
+  #stage{position:relative;width:960px;max-width:100%}
+  .hint{font-size:12px;opacity:.65;line-height:1.5}
+</style>
+</head>
+<body>
+<div id="wrap">
+  <div id="stage">
+    <canvas id="cv" width="960" height="576"></canvas>
+    <div id="ov"><div id="ovtxt"></div><button id="ovbtn" style="font-size:18px">再來一局</button></div>
+  </div>
+  <div id="side">
+    <div class="box">
+      <div class="stats"><span>💰 <span id="gold">0</span></span><span>❤️ <span id="lives">0</span></span><span>🌊 <span id="wave">0</span></span></div>
+      <div class="hint" id="status" style="margin-top:6px"></div>
+    </div>
+    <div class="box">
+      <h3>建造（快捷鍵 1–5）</h3>
+      <div id="build"></div>
+    </div>
+    <div class="box">
+      <h3>選取的建築</h3>
+      <div id="info">點擊建築查看</div>
+      <div class="row" style="margin-top:6px">
+        <button id="bUp">升級</button>
+        <button id="bSell">出售</button>
+        <button id="bRally">集結點</button>
+      </div>
+    </div>
+    <div class="box">
+      <div class="row">
+        <button id="bWave">▶ 下一波 (空白鍵)</button>
+        <button id="bSpeed">速度 x1</button>
+        <button id="bPause">暫停 (P)</button>
+        <button id="bNew">🎲 新地圖</button>
+      </div>
+      <div class="hint" style="margin-top:6px">地圖種子：<span id="seed"></span><br>兵營的士兵會在集結點擋住敵人，單位間會互相推擠避免重疊。</div>
+    </div>
+  </div>
+</div>
+
+<script>
+"use strict";
+const COLS=20, ROWS=12, T=48, W=COLS*T, H=ROWS*T;
+const cv=document.getElementById('cv'), ctx=cv.getContext('2d');
+const $=id=>document.getElementById(id);
+
+// ---------- 亂數（可用種子重現地圖） ----------
+function mulberry(a){return function(){a|=0;a=a+0x6D2B79F5|0;let t=Math.imul(a^a>>>15,1|a);t=t+Math.imul(t^t>>>7,61|t)^t;return((t^t>>>14)>>>0)/4294967296}}
+let rng=Math.random;
+const ri=(a,b)=>a+Math.floor(rng()*(b-a+1));
+
+// ---------- 建築資料 ----------
+const TYPES={
+  arrow:{name:'箭塔',icon:'🏹',cost:50,color:'#8b6b3e',up:[60,100],
+    range:[130,145,165],dmg:[8,14,24],cd:[0.6,0.5,0.35],desc:l=>`傷害 ${TYPES.arrow.dmg[l]}　射程 ${TYPES.arrow.range[l]}　攻速 ${(1/TYPES.arrow.cd[l]).toFixed(1)}/s`},
+  cannon:{name:'砲塔',icon:'💣',cost:100,color:'#555a66',up:[110,170],
+    range:[120,130,140],dmg:[25,45,80],cd:[1.6,1.5,1.3],splash:[45,55,65],desc:l=>`範圍傷害 ${TYPES.cannon.dmg[l]}　半徑 ${TYPES.cannon.splash[l]}　射程 ${TYPES.cannon.range[l]}`},
+  frost:{name:'冰塔',icon:'❄️',cost:80,color:'#3c7da8',up:[80,130],
+    range:[110,125,140],dmg:[3,6,10],cd:[0.9,0.9,0.8],slow:[0.55,0.42,0.3],desc:l=>`減速至 ${Math.round(TYPES.frost.slow[l]*100)}%　傷害 ${TYPES.frost.dmg[l]}　射程 ${TYPES.frost.range[l]}`},
+  barracks:{name:'兵營',icon:'🏕️',cost:90,color:'#8a3b3b',up:[90,140],
+    count:[2,3,4],hp:[60,100,160],dmg:[5,8,13],respawn:8,desc:l=>`士兵 ${TYPES.barracks.count[l]} 名　血量 ${TYPES.barracks.hp[l]}　攻擊 ${TYPES.barracks.dmg[l]}`},
+  mine:{name:'金礦',icon:'⛏️',cost:70,color:'#a8892c',up:[80,140],
+    income:[8,16,30],desc:l=>`每 5 秒 +${TYPES.mine.income[l]} 金幣`},
+};
+const ORDER=['arrow','cannon','frost','barracks','mine'];
+
+const ENEMY={
+  grunt:{hp:40,spd:42,r:8,reward:5,color:'#c94a4a',dmg:4,dmgToLife:1},
+  runner:{hp:26,spd:78,r:6,reward:4,color:'#e0a030',dmg:3,dmgToLife:1},
+  tank:{hp:170,spd:28,r:11,reward:12,color:'#6a4aa0',dmg:9,dmgToLife:2},
+  boss:{hp:900,spd:24,r:15,reward:70,color:'#222',dmg:18,dmgToLife:5},
+};
+
+// ---------- 狀態 ----------
+let G, grid, wps, pathCells, trees;
+let buildSel=null, selected=null, rallyMode=false, mouse={x:-1,y:-1,in:false};
+let seed=0, nextId=1;
+
+function genMap(){
+  grid=Array.from({length:ROWS},()=>Array(COLS).fill(0)); // 0 空 1 路 2 樹
+  const cells=[]; wps=[];
+  let r=ri(2,ROWS-3), x=0;
+  const mark=(c,rr)=>{grid[rr][c]=1;};
+  wps.push({x:-T/2,y:r*T+T/2});
+  mark(0,r); wps.push({x:T/2,y:r*T+T/2});
+  while(true){
+    const nx=Math.min(COLS-1,x+ri(2,4));
+    for(let c=x;c<=nx;c++)mark(c,r);
+    if(nx>=COLS-1){wps.push({x:W+T/2,y:r*T+T/2});break;}
+    let nr; do{nr=ri(1,ROWS-2);}while(Math.abs(nr-r)<2);
+    wps.push({x:nx*T+T/2,y:r*T+T/2});
+    const a=Math.min(r,nr),b=Math.max(r,nr);
+    for(let rr=a;rr<=b;rr++)mark(nx,rr);
+    wps.push({x:nx*T+T/2,y:nr*T+T/2});
+    r=nr;x=nx;
+  }
+  // 去除重複相鄰航點
+  wps=wps.filter((p,i)=>i===0||p.x!==wps[i-1].x||p.y!==wps[i-1].y);
+  trees=[];
+  for(let rr=0;rr<ROWS;rr++)for(let c=0;c<COLS;c++){
+    if(grid[rr][c]===0&&rng()<0.13){grid[rr][c]=2;}
+    if(grid[rr][c]===0||grid[rr][c]===2)trees.push({c,r:rr,v:rng()});
+  }
+  // 路徑取樣（給集結點使用）
+  pathCells=[];
+  for(let i=0;i<wps.length-1;i++){
+    const a=wps[i],b=wps[i+1],len=Math.hypot(b.x-a.x,b.y-a.y);
+    for(let d=0;d<len;d+=8)pathCells.push({x:a.x+(b.x-a.x)*d/len,y:a.y+(b.y-a.y)*d/len});
+  }
+}
+
+function newGame(s){
+  seed=s??Math.floor(Math.random()*1e6);
+  rng=mulberry(seed);
+  genMap();
+  rng=Math.random; // 遊戲過程使用一般亂數
+  G={gold:160,lives:20,wave:0,enemies:[],soldiers:[],towers:[],projs:[],fx:[],texts:[],
+     queue:[],spawnT:0,waveActive:false,countdown:25,over:false,speed:1,paused:false,time:0};
+  selected=null;buildSel=null;rallyMode=false;
+  $('seed').textContent=seed;
+  $('ov').style.display='none';
+  refreshBuildBtns();
+}
+
+// ---------- 建造 UI ----------
+function initBuildUI(){
+  const box=$('build');
+  ORDER.forEach((k,i)=>{
+    const b=document.createElement('button');b.id='b_'+k;
+    b.onclick=()=>{buildSel=buildSel===k?null:k;selected=null;rallyMode=false;refreshBuildBtns();};
+    box.appendChild(b);
+  });
+}
+function refreshBuildBtns(){
+  ORDER.forEach((k,i)=>{
+    const t=TYPES[k],b=$('b_'+k);
+    b.innerHTML=`${t.icon} ${i+1}. ${t.name} <b style="float:right">💰${t.cost}</b><small>${t.desc(0)}</small>`;
+    b.disabled=G.gold<t.cost;
+    b.classList.toggle('on',buildSel===k);
+  });
+}
+
+// ---------- 建築操作 ----------
+function towerAt(c,r){return G.towers.find(t=>t.c===c&&t.r===r);}
+function place(k,c,r){
+  const t=TYPES[k];
+  if(G.gold<t.cost||grid[r][c]!==0||towerAt(c,r))return;
+  G.gold-=t.cost;
+  const tw={id:nextId++,k,c,r,x:c*T+T/2,y:r*T+T/2,lv:0,cd:0,spent:t.cost,units:[],respawn:0,mineT:0,rally:null,flash:0};
+  if(k==='barracks'){ // 集結點預設：最近的路徑點
+    let best=null,bd=1e9;
+    for(const p of pathCells){const d=Math.hypot(p.x-tw.x,p.y-tw.y);if(d<bd){bd=d;best=p;}}
+    tw.rally={x:best.x,y:best.y};
+    tw.respawn=0.5;
+  }
+  G.towers.push(tw);
+  selected=tw;
+  if(G.gold<t.cost)buildSel=null;
+}
+function upgrade(tw){
+  const t=TYPES[tw.k];
+  if(tw.lv>=2)return;
+  const cost=t.up[tw.lv];
+  if(G.gold<cost)return;
+  G.gold-=cost;tw.spent+=cost;tw.lv++;
+  if(tw.k==='barracks')for(const s of tw.units){s.max=t.hp[tw.lv];s.hp=s.max;s.dmg=t.dmg[tw.lv];}
+}
+function sell(tw){
+  G.gold+=Math.floor(tw.spent*0.7);
+  for(const s of tw.units)s.dead=true;
+  G.towers.splice(G.towers.indexOf(tw),1);
+  selected=null;rallyMode=false;
+}
+
+// ---------- 波次 ----------
+function startWave(){
+  if(G.waveActive||G.over)return;
+  G.wave++;G.waveActive=true;
+  const n=G.wave, scale=Math.pow(1.13,n-1);
+  const count=5+Math.floor(n*1.8);
+  G.queue=[];
+  for(let i=0;i<count;i++){
+    let type='grunt',r=Math.random();
+    if(n>=4&&r<0.25)type='tank';else if(n>=2&&r<0.55)type='runner';
+    G.queue.push({type,scale});
+  }
+  if(n%5===0)G.queue.push({type:'boss',scale});
+  G.spawnT=0;
+}
+function spawnEnemy(q){
+  const d=ENEMY[q.type],p=wps[0];
+  const hp=d.hp*q.scale;
+  G.enemies.push({id:nextId++,team:1,type:q.type,x:p.x-Math.random()*10,y:p.y+(Math.random()-.5)*12,wp:1,
+    hp,max:hp,spd:d.spd*(0.92+Math.random()*0.16),r:d.r,reward:Math.round(d.reward*(1+(G.wave-1)*0.04)),
+    slow:1,slowT:0,cd:0,dmg:d.dmg*(1+(G.wave-1)*0.05),life:d.dmgToLife,tgt:null});
+}
+
+// ---------- 空間雜湊（讓碰撞只和附近單位比較，O(n)） ----------
+const CS=32,GC=Math.ceil(W/CS)+1,GR=Math.ceil(H/CS)+1;
+let cells=Array.from({length:GC*GR},()=>[]);
+function rebuildGrid(){
+  for(const c of cells)c.length=0;
+  const add=e=>{
+    const cx=Math.max(0,Math.min(GC-1,Math.floor(e.x/CS))),cy=Math.max(0,Math.min(GR-1,Math.floor(e.y/CS)));
+    cells[cy*GC+cx].push(e);
+  };
+  for(const e of G.enemies)add(e);
+  for(const s of G.soldiers)add(s);
+}
+function separate(e){
+  const cx=Math.floor(e.x/CS),cy=Math.floor(e.y/CS);
+  let n=0;
+  for(let j=cy-1;j<=cy+1;j++){
+    if(j<0||j>=GR)continue;
+    for(let i=cx-1;i<=cx+1;i++){
+      if(i<0||i>=GC)continue;
+      for(const o of cells[j*GC+i]){
+        if(o===e||o.dead)continue;
+        const dx=e.x-o.x,dy=e.y-o.y,min=e.r+o.r;
+        const d2=dx*dx+dy*dy;
+        if(d2<min*min){
+          const d=Math.sqrt(d2)||0.01,push=(min-d)*0.5;
+          e.x+=dx/d*push;e.y+=dy/d*push;
+          if(++n>8)return;
+        }
+      }
+    }
+  }
+}
+
+// ---------- 更新 ----------
+function update(dt){
+  G.time+=dt;
+  // 波次
+  if(G.waveActive){
+    if(G.queue.length){
+      G.spawnT-=dt;
+      if(G.spawnT<=0){spawnEnemy(G.queue.shift());G.spawnT=0.65;}
+    }else if(!G.enemies.length){
+      G.waveActive=false;G.countdown=20;
+      const bonus=25+G.wave*4;G.gold+=bonus;
+      G.texts.push({x:W/2,y:60,t:1.6,s:`第 ${G.wave} 波完成！+${bonus}💰`,c:'#ffd54a'});
+    }
+  }else{
+    G.countdown-=dt;
+    if(G.countdown<=0)startWave();
+  }
+
+  rebuildGrid();
+
+  // 建築
+  for(const tw of G.towers){
+    const T0=TYPES[tw.k];
+    tw.flash=Math.max(0,tw.flash-dt);
+    if(tw.k==='mine'){
+      tw.mineT+=dt;
+      if(tw.mineT>=5){tw.mineT=0;const g=T0.income[tw.lv];G.gold+=g;G.texts.push({x:tw.x,y:tw.y-20,t:1,s:'+'+g,c:'#ffd54a'});}
+    }else if(tw.k==='barracks'){
+      tw.units=tw.units.filter(u=>!u.dead);
+      if(tw.units.length<T0.count[tw.lv]){
+        tw.respawn-=dt;
+        if(tw.respawn<=0){
+          const used=new Set(tw.units.map(u=>u.slot));let slot=0;while(used.has(slot))slot++;
+          const s={id:nextId++,team:0,x:tw.x,y:tw.y,r:6,hp:T0.hp[tw.lv],max:T0.hp[tw.lv],dmg:T0.dmg[tw.lv],spd:70,cd:0,home:tw,slot,tgt:null};
+          tw.units.push(s);G.soldiers.push(s);tw.respawn=T0.respawn;
+        }
+      }
+    }else{
+      tw.cd-=dt;
+      if(tw.cd<=0){
+        const range=T0.range[tw.lv];
+        let best=null,bp=-1;
+        for(const e of G.enemies){
+          if(Math.hypot(e.x-tw.x,e.y-tw.y)<=range){
+            const prog=e.wp*10000-Math.hypot(wps[e.wp].x-e.x,wps[e.wp].y-e.y);
+            if(prog>bp){bp=prog;best=e;}
+          }
+        }
+        if(best){
+          tw.cd=T0.cd[tw.lv];tw.flash=0.12;
+          if(tw.k==='frost'){
+            const rad=38;
+            for(const e of G.enemies)if(Math.hypot(e.x-best.x,e.y-best.y)<=rad){
+              e.hp-=T0.dmg[tw.lv];e.slow=T0.slow[tw.lv];e.slowT=2;
+            }
+            G.fx.push({x:best.x,y:best.y,r:rad,t:0.3,max:0.3,c:'#7fd6ff',ring:true});
+            G.fx.push({line:true,x:tw.x,y:tw.y,x2:best.x,y2:best.y,t:0.12,max:0.12,c:'#9be'});
+          }else{
+            G.projs.push({x:tw.x,y:tw.y,tgt:best,k:tw.k,dmg:T0.dmg[tw.lv],splash:T0.splash?T0.splash[tw.lv]:0,spd:tw.k==='arrow'?460:240,lx:best.x,ly:best.y});
+          }
+        }
+      }
+    }
+  }
+
+  // 投射物
+  for(const p of G.projs){
+    if(p.tgt&&!p.tgt.dead){p.lx=p.tgt.x;p.ly=p.tgt.y;}
+    const dx=p.lx-p.x,dy=p.ly-p.y,d=Math.hypot(dx,dy),st=p.spd*dt;
+    if(d<=st+3){
+      p.done=true;
+      if(p.splash){
+        for(const e of G.enemies)if(Math.hypot(e.x-p.lx,e.y-p.ly)<=p.splash)e.hp-=p.dmg;
+        G.fx.push({x:p.lx,y:p.ly,r:p.splash,t:0.3,max:0.3,c:'#ffb347',ring:true,fill:true});
+      }else if(p.tgt&&!p.tgt.dead)p.tgt.hp-=p.dmg;
+    }else{p.x+=dx/d*st;p.y+=dy/d*st;}
+  }
+  G.projs=G.projs.filter(p=>!p.done);
+
+  // 士兵
+  for(const s of G.soldiers){
+    if(s.dead)continue;
+    s.cd-=dt;
+    const rally=s.home.rally;
+    // 選目標：集結點附近 110 內最近的敵人
+    let tgt=s.tgt;
+    if(tgt&&(tgt.dead||Math.hypot(tgt.x-rally.x,tgt.y-rally.y)>130))tgt=null;
+    if(!tgt){
+      let bd=1e9;
+      for(const e of G.enemies){
+        const dr=Math.hypot(e.x-rally.x,e.y-rally.y);
+        if(dr<110){const d=Math.hypot(e.x-s.x,e.y-s.y);if(d<bd){bd=d;tgt=e;}}
+      }
+    }
+    s.tgt=tgt;
+    let tx,ty,stop;
+    if(tgt){tx=tgt.x;ty=tgt.y;stop=s.r+tgt.r+2;}
+    else{
+      const a=s.slot*2.4,rad=s.slot===0?0:10+7*Math.sqrt(s.slot);
+      tx=rally.x+Math.cos(a)*rad;ty=rally.y+Math.sin(a)*rad;stop=2;
+    }
+    const dx=tx-s.x,dy=ty-s.y,d=Math.hypot(dx,dy);
+    if(d>stop){const m=Math.min(s.spd*dt,d-stop+0.01);s.x+=dx/d*m;s.y+=dy/d*m;}
+    else if(tgt&&s.cd<=0){s.cd=0.8;tgt.hp-=s.dmg;}
+  }
+
+  // 敵人
+  for(const e of G.enemies){
+    e.cd-=dt;
+    if(e.slowT>0){e.slowT-=dt;if(e.slowT<=0)e.slow=1;}
+    // 找附近士兵
+    let tgt=e.tgt;
+    if(tgt&&(tgt.dead||Math.hypot(tgt.x-e.x,tgt.y-e.y)>70))tgt=null;
+    if(!tgt){
+      let bd=60;
+      const cx=Math.floor(e.x/CS),cy=Math.floor(e.y/CS);
+      for(let j=cy-2;j<=cy+2;j++){if(j<0||j>=GR)continue;
+        for(let i=cx-2;i<=cx+2;i++){if(i<0||i>=GC)continue;
+          for(const o of cells[j*GC+i]){
+            if(o.team!==0||o.dead)continue;
+            const d=Math.hypot(o.x-e.x,o.y-e.y);if(d<bd){bd=d;tgt=o;}
+          }}}
+    }
+    e.tgt=tgt;
+    if(tgt){
+      const dx=tgt.x-e.x,dy=tgt.y-e.y,d=Math.hypot(dx,dy),stop=e.r+tgt.r+1;
+      if(d>stop){const m=Math.min(e.spd*e.slow*dt,d-stop);e.x+=dx/d*m;e.y+=dy/d*m;}
+      else if(e.cd<=0){e.cd=1;tgt.hp-=e.dmg;}
+    }else{
+      const w=wps[e.wp],dx=w.x-e.x,dy=w.y-e.y,d=Math.hypot(dx,dy),m=e.spd*e.slow*dt;
+      if(d<=m+1){e.wp++;if(e.wp>=wps.length){e.dead=true;G.lives-=e.life;e.leaked=true;}}
+      else{e.x+=dx/d*m;e.y+=dy/d*m;}
+    }
+  }
+
+  // 碰撞分離（全部單位）
+  for(const e of G.enemies)if(!e.dead)separate(e);
+  for(const s of G.soldiers)if(!s.dead)separate(s);
+
+  // 死亡處理
+  for(const e of G.enemies){
+    if(!e.dead&&e.hp<=0){
+      e.dead=true;G.gold+=e.reward;
+      G.fx.push({x:e.x,y:e.y,r:e.r+4,t:0.3,max:0.3,c:ENEMY[e.type].color,ring:true,fill:true});
+      G.texts.push({x:e.x,y:e.y-8,t:0.7,s:'+'+e.reward,c:'#ffd54a'});
+    }
+  }
+  for(const s of G.soldiers)if(!s.dead&&s.hp<=0)s.dead=true;
+  G.enemies=G.enemies.filter(e=>!e.dead);
+  G.soldiers=G.soldiers.filter(s=>!s.dead);
+  for(const e of G.enemies)if(e.tgt&&e.tgt.dead)e.tgt=null;
+
+  for(const f of G.fx)f.t-=dt;G.fx=G.fx.filter(f=>f.t>0);
+  for(const t of G.texts){t.t-=dt;t.y-=18*dt;}G.texts=G.texts.filter(t=>t.t>0);
+
+  if(G.lives<=0){G.lives=0;G.over=true;$('ovtxt').textContent=`💀 防線失守！撐到第 ${G.wave} 波`;$('ov').style.display='flex';}
+}
+
+// ---------- 繪圖 ----------
+function draw(){
+  // 地面
+  for(let r=0;r<ROWS;r++)for(let c=0;c<COLS;c++){
+    const path=grid[r][c]===1;
+    ctx.fillStyle=path?'#b99a64':((r+c)%2?'#3b7a3b':'#397539');
+    ctx.fillRect(c*T,r*T,T,T);
+  }
+  for(const t of trees){
+    if(grid[t.r][t.c]===2){
+      const x=t.c*T+T/2,y=t.r*T+T/2;
+      ctx.fillStyle='#5a3b1a';ctx.fillRect(x-3,y+4,6,10);
+      ctx.fillStyle='#1f5a2a';ctx.beginPath();ctx.arc(x,y,14+t.v*4,0,7);ctx.fill();
+      ctx.fillStyle='#2b7a38';ctx.beginPath();ctx.arc(x-3,y-3,8,0,7);ctx.fill();
+    }
+  }
+  // 入口/出口
+  ctx.font='20px sans-serif';ctx.textAlign='center';ctx.textBaseline='middle';
+  ctx.fillText('🚩',T/2,wps[1].y);
+  ctx.fillText('🏰',W-T/2,wps[wps.length-2].y);
+
+  // 懸停格子
+  const hc=Math.floor(mouse.x/T),hr=Math.floor(mouse.y/T);
+  const hv=mouse.in&&hc>=0&&hc<COLS&&hr>=0&&hr<ROWS;
+  if(hv&&buildSel){
+    const ok=grid[hr][hc]===0&&!towerAt(hc,hr);
+    ctx.fillStyle=ok?'#fff3':'#f003';ctx.fillRect(hc*T,hr*T,T,T);
+    const rg=TYPES[buildSel].range;
+    if(rg){ctx.strokeStyle='#fff8';ctx.beginPath();ctx.arc(hc*T+T/2,hr*T+T/2,rg[0],0,7);ctx.stroke();}
+  }
+  if(selected){
+    ctx.strokeStyle='#ffd54a';ctx.lineWidth=2;ctx.strokeRect(selected.c*T+1,selected.r*T+1,T-2,T-2);ctx.lineWidth=1;
+    const rg=TYPES[selected.k].range;
+    if(rg){ctx.fillStyle='#fff1';ctx.strokeStyle='#fff8';ctx.beginPath();ctx.arc(selected.x,selected.y,rg[selected.lv],0,7);ctx.fill();ctx.stroke();}
+    if(selected.rally){
+      ctx.strokeStyle='#4af';ctx.beginPath();ctx.arc(selected.rally.x,selected.rally.y,10,0,7);ctx.stroke();
+      ctx.fillText('🚩',selected.rally.x,selected.rally.y);
+    }
+    if(rallyMode){ctx.strokeStyle='#4af8';ctx.setLineDash([6,5]);ctx.beginPath();ctx.arc(selected.x,selected.y,170,0,7);ctx.stroke();ctx.setLineDash([]);}
+  }
+
+  // 建築
+  for(const tw of G.towers){
+    ctx.fillStyle='#0004';ctx.fillRect(tw.c*T+4,tw.r*T+6,T-6,T-6);
+    ctx.fillStyle=tw.flash>0?'#fff':TYPES[tw.k].color;
+    ctx.beginPath();ctx.roundRect(tw.c*T+3,tw.r*T+3,T-6,T-6,8);ctx.fill();
+    ctx.font='24px sans-serif';ctx.fillStyle='#fff';ctx.fillText(TYPES[tw.k].icon,tw.x,tw.y+1);
+    ctx.fillStyle='#ffd54a';
+    for(let i=0;i<=tw.lv;i++){ctx.beginPath();ctx.arc(tw.c*T+10+i*8,tw.r*T+T-8,3,0,7);ctx.fill();}
+  }
+
+  // 單位
+  const unit=(e,col,rim)=>{
+    ctx.fillStyle='#0003';ctx.beginPath();ctx.ellipse(e.x,e.y+e.r*0.7,e.r,e.r*0.5,0,0,7);ctx.fill();
+    ctx.fillStyle=col;ctx.beginPath();ctx.arc(e.x,e.y,e.r,0,7);ctx.fill();
+    ctx.strokeStyle=rim;ctx.lineWidth=1.5;ctx.stroke();ctx.lineWidth=1;
+    if(e.hp<e.max){
+      ctx.fillStyle='#000a';ctx.fillRect(e.x-e.r,e.y-e.r-7,e.r*2,3);
+      ctx.fillStyle=e.team?'#e44':'#4c4';ctx.fillRect(e.x-e.r,e.y-e.r-7,e.r*2*Math.max(0,e.hp/e.max),3);
+    }
+  };
+  for(const e of G.enemies){unit(e,ENEMY[e.type].color,e.slow<1?'#7fd6ff':'#000');}
+  for(const s of G.soldiers)unit(s,'#4a8be0','#cfe3ff');
+
+  // 投射物
+  for(const p of G.projs){
+    ctx.fillStyle=p.k==='arrow'?'#fff':'#222';
+    ctx.beginPath();ctx.arc(p.x,p.y,p.k==='arrow'?2.5:5,0,7);ctx.fill();
+  }
+  // 特效
+  for(const f of G.fx){
+    const a=f.t/f.max;
+    if(f.line){ctx.strokeStyle=f.c;ctx.globalAlpha=a;ctx.beginPath();ctx.moveTo(f.x,f.y);ctx.lineTo(f.x2,f.y2);ctx.stroke();ctx.globalAlpha=1;continue;}
+    ctx.globalAlpha=a;ctx.strokeStyle=f.c;ctx.fillStyle=f.c;
+    ctx.beginPath();ctx.arc(f.x,f.y,f.r*(1.2-a*0.4),0,7);
+    if(f.fill){ctx.globalAlpha=a*0.4;ctx.fill();ctx.globalAlpha=a;}
+    ctx.stroke();ctx.globalAlpha=1;
+  }
+  ctx.font='bold 14px sans-serif';
+  for(const t of G.texts){ctx.globalAlpha=Math.min(1,t.t*2);ctx.fillStyle=t.c;ctx.fillText(t.s,t.x,t.y);}
+  ctx.globalAlpha=1;
+  if(G.paused){ctx.fillStyle='#0007';ctx.fillRect(0,0,W,H);ctx.fillStyle='#fff';ctx.font='bold 40px sans-serif';ctx.fillText('已暫停',W/2,H/2);}
+}
+
+// ---------- 側邊 UI 更新 ----------
+function updateUI(){
+  $('gold').textContent=Math.floor(G.gold);
+  $('lives').textContent=G.lives;
+  $('wave').textContent=G.wave;
+  $('status').textContent=G.waveActive?`敵人剩餘：${G.enemies.length+G.queue.length}`:`下一波 ${Math.ceil(G.countdown)} 秒後自動開始`;
+  $('bWave').disabled=G.waveActive;
+  $('bSpeed').textContent='速度 x'+G.speed;
+  $('bPause').textContent=G.paused?'▶ 繼續 (P)':'⏸ 暫停 (P)';
+  ORDER.forEach(k=>{$('b_'+k).disabled=G.gold<TYPES[k].cost;});
+  const tw=selected;
+  if(tw){
+    const t=TYPES[tw.k];
+    $('info').innerHTML=`<b>${t.icon} ${t.name}</b>　Lv.${tw.lv+1}${tw.lv>=2?'（滿級）':''}<br>${t.desc(tw.lv)}`+
+      (tw.lv<2?`<br><span style="opacity:.7">升級後：${t.desc(tw.lv+1)}</span>`:'');
+    $('bUp').disabled=tw.lv>=2||G.gold<t.up[tw.lv];
+    $('bUp').textContent=tw.lv>=2?'已滿級':`升級 💰${t.up[tw.lv]} (U)`;
+    $('bSell').disabled=false;$('bSell').textContent=`出售 +${Math.floor(tw.spent*0.7)} (S)`;
+    $('bRally').style.display=tw.k==='barracks'?'':'none';
+    $('bRally').classList.toggle('on',rallyMode);
+    $('bUp').style.display=$('bSell').style.display='';
+  }else{
+    $('info').textContent=buildSel?'點擊空地建造（右鍵/Esc 取消）':'點擊建築查看';
+    $('bUp').style.display=$('bSell').style.display=$('bRally').style.display='none';
+  }
+  refreshBuildBtnsActive();
+}
+function refreshBuildBtnsActive(){ORDER.forEach(k=>$('b_'+k).classList.toggle('on',buildSel===k));}
+
+// ---------- 輸入 ----------
+function toWorld(ev){
+  const r=cv.getBoundingClientRect();
+  return {x:(ev.clientX-r.left)*W/r.width,y:(ev.clientY-r.top)*H/r.height};
+}
+cv.addEventListener('mousemove',e=>{const p=toWorld(e);mouse.x=p.x;mouse.y=p.y;mouse.in=true;});
+cv.addEventListener('mouseleave',()=>mouse.in=false);
+cv.addEventListener('contextmenu',e=>{e.preventDefault();buildSel=null;rallyMode=false;});
+cv.addEventListener('mousedown',e=>{
+  if(e.button!==0||G.over)return;
+  const p=toWorld(e),c=Math.floor(p.x/T),r=Math.floor(p.y/T);
+  if(c<0||c>=COLS||r<0||r>=ROWS)return;
+  if(rallyMode&&selected&&selected.k==='barracks'){
+    if(Math.hypot(p.x-selected.x,p.y-selected.y)<=170&&grid[r][c]!==2){selected.rally={x:p.x,y:p.y};}
+    rallyMode=false;return;
+  }
+  const tw=towerAt(c,r);
+  if(tw){selected=tw;buildSel=null;rallyMode=false;return;}
+  if(buildSel&&grid[r][c]===0){place(buildSel,c,r);return;}
+  selected=null;rallyMode=false;
+});
+$('bUp').onclick=()=>selected&&upgrade(selected);
+$('bSell').onclick=()=>selected&&sell(selected);
+$('bRally').onclick=()=>{rallyMode=!rallyMode;};
+$('bWave').onclick=startWave;
+$('bSpeed').onclick=()=>G.speed=G.speed===1?2:G.speed===2?3:1;
+$('bPause').onclick=()=>G.paused=!G.paused;
+$('bNew').onclick=()=>newGame();
+$('ovbtn').onclick=()=>newGame();
+addEventListener('keydown',e=>{
+  const k=e.key.toLowerCase();
+  if(k>='1'&&k<='5'){buildSel=ORDER[+k-1];selected=null;rallyMode=false;}
+  else if(k==='escape'){buildSel=null;rallyMode=false;selected=null;}
+  else if(k===' '){e.preventDefault();startWave();}
+  else if(k==='p')G.paused=!G.paused;
+  else if(k==='u'&&selected)upgrade(selected);
+  else if(k==='s'&&selected)sell(selected);
+});
+
+// ---------- 主迴圈 ----------
+let last=performance.now();
+function loop(now){
+  let dt=Math.min(0.05,(now-last)/1000);last=now;
+  if(!G.paused&&!G.over)for(let i=0;i<G.speed;i++)update(dt);
+  draw();updateUI();
+  requestAnimationFrame(loop);
+}
+initBuildUI();
+newGame();
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>

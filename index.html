@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Knitguard: The Last Stitch</title>
+</head>
+<body>
+  <div id="app"></div>
+  <div id="hud">
+    <span>💰 <b id="hGold">0</b></span>
+    <span>🏰 <b id="hBase">0</b></span>
+    <span>🌊 第 <b id="hWave">0</b> 波</span>
+    <span id="hNext"></span>
+    <span>☠️ <b id="hKills">0</b></span>
+  </div>
+  <div id="stats"></div>
+  <div id="toolbar"></div>
+  <div id="selPanel">
+    <div id="selInfo"></div>
+    <div class="row">
+      <button id="selUp">升級</button>
+      <button id="selSell">拆除</button>
+      <button id="selRally">🚩 集結點</button>
+    </div>
+  </div>
+  <div id="help">
+    左鍵：使用工具（牆可拖曳）<br>
+    右鍵拖曳：旋轉　滾輪：縮放<br>
+    WASD：移動　Q/E：轉向<br>
+    空白：下一波　P：暫停　F：流場　U：升級
+  </div>
+  <div id="over"><div id="overTxt"></div><button id="overBtn">🎲 再來一局</button></div>
+  <script type="module" src="/src/main.ts"></script>
+</body>
+</html>

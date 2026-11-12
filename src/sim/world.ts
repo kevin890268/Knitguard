@@ -1,0 +1,517 @@
+import { Rng } from '../core/rng';
+import { GameMap, Tile } from './map';
+import { Units } from './units';
+import { SpatialHash } from './spatialHash';
+import { FlowField } from './flowfield';
+import { BK, BUILDING_KINDS, ECON, MAX_LEVEL, Team, UK, UNIT_KINDS } from './data';
+
+export interface Building {
+  id: number;
+  kind: number;
+  tx: number;
+  ty: number;
+  size: number;
+  hp: number;
+  maxHp: number;
+  level: number;
+  cd: number;
+  spawnT: number;
+  units: number; // 兵營：目前存活的士兵數
+  rallyX: number;
+  rallyY: number;
+  invested: number;
+  hitT: number;
+  dead: boolean;
+}
+
+export interface Shot {
+  x1: number; y1: number; x2: number; y2: number; t: number;
+}
+
+export const MAX_UNITS = 12000;
+
+/**
+ * 整個遊戲世界的模擬。完全不碰繪圖 → 之後可以做重播、無頭測試、或搬到 Worker。
+ * 座標：1 單位 = 1 格，(x, y) 對應 3D 的 (x, z)。
+ */
+export class World {
+  readonly map: GameMap;
+  readonly units = new Units(MAX_UNITS);
+  readonly hash: SpatialHash;
+  readonly flow: FlowField;
+  readonly occ: Int32Array; // 每格的建築 id，-1 = 無
+  readonly byId = new Map<number, Building>();
+  buildings: Building[] = [];
+  base: Building;
+
+  gold = ECON.startGold;
+  freeBuild = false;
+  wave = 0;
+  waveInterval = 45;
+  waveTimer = 60;
+  autoWaves = true;
+  gameOver = false;
+  time = 0;
+  tick = 0;
+  kills = 0;
+
+  buildingsVersion = 0;
+  shots: Shot[] = [];
+  spawnPoints: number[] = [];
+
+  private costs: Float32Array;
+  private flowDirty = true;
+  private spawnQueue: number[] = []; // kind, x, y 三個一組
+  private nextBid = 1;
+  private tmp = new Int32Array(4096);
+  private rng: Rng;
+
+  constructor(readonly seed: number, size = 96) {
+    this.rng = new Rng(seed ^ 0x9e3779b9);
+    this.map = new GameMap(size, size, seed);
+    this.hash = new SpatialHash(size, size, 1.25, MAX_UNITS);
+    this.flow = new FlowField(size, size);
+    this.occ = new Int32Array(size * size).fill(-1);
+    this.costs = new Float32Array(size * size);
+    this.base = this.addBuilding(BK.Base, this.map.baseX, this.map.baseY);
+    this.recomputeFlow();
+    const { w, h } = this.map;
+    const edge: number[] = [];
+    for (let x = 0; x < w; x++) edge.push(x, (h - 1) * w + x);
+    for (let y = 1; y < h - 1; y++) edge.push(y * w, y * w + w - 1);
+    this.spawnPoints = edge.filter((i) => this.flow.dist[i] < Infinity);
+  }
+
+  // ---------------------------------------------------------------- 主更新
+  step(dt: number): void {
+    this.tick++;
+    this.time += dt;
+    const u = this.units;
+    for (let i = 0; i < u.hi; i++) {
+      if (u.alive[i]) { u.px[i] = u.x[i]; u.py[i] = u.y[i]; }
+    }
+    if (this.flowDirty) this.recomputeFlow();
+    this.gold += ECON.passiveIncome * dt;
+    if (this.autoWaves) {
+      this.waveTimer -= dt;
+      if (this.waveTimer <= 0) this.spawnWave();
+    }
+    this.processSpawns();
+    this.hash.build(u);
+    this.updateUnits(dt);
+    this.updateBuildings(dt);
+    this.resolveCollisions();
+    this.cleanup(dt);
+  }
+
+  // ---------------------------------------------------------------- 波次 / 生成
+  spawnWave(): void {
+    this.wave++;
+    this.waveTimer = this.waveInterval;
+    const w = this.wave;
+    this.spawnHorde(Math.round(12 + w * 8 + w * w * 1.5));
+  }
+
+  spawnHorde(count: number): void {
+    if (!this.spawnPoints.length) return;
+    const clusters: number[] = [];
+    const nc = 1 + Math.min(3, Math.floor(this.wave / 3));
+    for (let c = 0; c < nc; c++) clusters.push(this.spawnPoints[this.rng.int(0, this.spawnPoints.length - 1)]);
+    const w = this.map.w;
+    for (let n = 0; n < count; n++) {
+      const sp = clusters[n % clusters.length];
+      let x = (sp % w) + 0.5 + this.rng.range(-2, 2);
+      let y = Math.floor(sp / w) + 0.5 + this.rng.range(-2, 2);
+      if (this.isSolid(Math.floor(x), Math.floor(y))) { x = (sp % w) + 0.5; y = Math.floor(sp / w) + 0.5; }
+      const r = this.rng.next();
+      let kind: number = UK.Fuzz;
+      if (this.wave >= 4 && r < 0.05 + this.wave * 0.005) kind = UK.Brute;
+      else if (this.wave >= 2 && r < 0.3) kind = UK.Runner;
+      this.spawnQueue.push(kind, x, y);
+    }
+  }
+
+  spawnUnitAt(kind: number, x: number, y: number): number {
+    return this.units.spawn(kind, x, y);
+  }
+
+  private processSpawns(): void {
+    const q = this.spawnQueue;
+    const n = Math.min(q.length / 3, 60);
+    for (let k = 0; k < n; k++) this.units.spawn(q[k * 3], q[k * 3 + 1], q[k * 3 + 2]);
+    q.splice(0, n * 3);
+  }
+
+  get pendingSpawns(): number {
+    return this.spawnQueue.length / 3;
+  }
+
+  // ---------------------------------------------------------------- 建築
+  canPlace(kind: number, tx: number, ty: number): boolean {
+    const s = BUILDING_KINDS[kind].size;
+    for (let y = ty; y < ty + s; y++)
+      for (let x = tx; x < tx + s; x++) {
+        if (!this.map.inBounds(x, y) || this.map.solidTerrain(x, y) || this.occ[y * this.map.w + x] >= 0) return false;
+      }
+    return true;
+  }
+
+  canAfford(cost: number): boolean {
+    return this.freeBuild || this.gold >= cost;
+  }
+
+  tryPlace(kind: number, tx: number, ty: number): Building | null {
+    const cost = BUILDING_KINDS[kind].cost;
+    if (!this.canPlace(kind, tx, ty) || !this.canAfford(cost)) return null;
+    if (!this.freeBuild) this.gold -= cost;
+    return this.addBuilding(kind, tx, ty);
+  }
+
+  private addBuilding(kind: number, tx: number, ty: number): Building {
+    const k = BUILDING_KINDS[kind];
+    const b: Building = {
+      id: this.nextBid++, kind, tx, ty, size: k.size, hp: k.hp, maxHp: k.hp, level: 1,
+      cd: 0, spawnT: 1, units: 0, rallyX: 0, rallyY: 0, invested: k.cost, hitT: 0, dead: false,
+    };
+    for (let y = ty; y < ty + k.size; y++)
+      for (let x = tx; x < tx + k.size; x++) this.occ[y * this.map.w + x] = b.id;
+    if (kind === BK.Barracks) {
+      const cx = tx + k.size / 2, cy = ty + k.size / 2;
+      const bx = this.map.baseX + 1.5, by = this.map.baseY + 1.5;
+      let dx = cx - bx, dy = cy - by;
+      const d = Math.hypot(dx, dy) || 1;
+      dx /= d; dy /= d;
+      b.rallyX = cx + dx * (k.size / 2 + 1.5);
+      b.rallyY = cy + dy * (k.size / 2 + 1.5);
+      if (this.isSolid(Math.floor(b.rallyX), Math.floor(b.rallyY))) { b.rallyX = cx; b.rallyY = ty + k.size + 0.8; }
+    }
+    this.buildings.push(b);
+    this.byId.set(b.id, b);
+    this.buildingsVersion++;
+    this.flowDirty = true;
+    return b;
+  }
+
+  removeBuilding(b: Building, refund: boolean): void {
+    if (b.kind === BK.Base || b.dead) return;
+    for (let y = b.ty; y < b.ty + b.size; y++)
+      for (let x = b.tx; x < b.tx + b.size; x++) this.occ[y * this.map.w + x] = -1;
+    b.dead = true;
+    if (refund) this.gold += Math.floor(b.invested * ECON.refundRatio);
+    this.byId.delete(b.id);
+    this.buildings = this.buildings.filter((o) => o !== b);
+    this.buildingsVersion++;
+    this.flowDirty = true;
+  }
+
+  upgradeCost(b: Building): number | null {
+    if (b.level >= MAX_LEVEL) return null;
+    return BUILDING_KINDS[b.kind].upgradeCost[b.level - 1] ?? null;
+  }
+
+  upgrade(b: Building): boolean {
+    const cost = this.upgradeCost(b);
+    if (cost === null || !this.canAfford(cost)) return false;
+    if (!this.freeBuild) this.gold -= cost;
+    b.invested += cost;
+    b.level++;
+    b.maxHp = Math.round(b.maxHp * 1.4);
+    b.hp = b.maxHp;
+    if (b.kind === BK.Barracks) {
+      const u = this.units;
+      for (let i = 0; i < u.hi; i++) {
+        if (u.alive[i] && u.owner[i] === b.id) this.applySheepLevel(i, b.level, true);
+      }
+    }
+    this.buildingsVersion++;
+    return true;
+  }
+
+  setRally(b: Building, x: number, y: number): void {
+    b.rallyX = x;
+    b.rallyY = y;
+    const u = this.units;
+    for (let i = 0; i < u.hi; i++) {
+      if (u.alive[i] && u.owner[i] === b.id) {
+        u.homeX[i] = x + this.rng.range(-0.8, 0.8);
+        u.homeY[i] = y + this.rng.range(-0.8, 0.8);
+      }
+    }
+  }
+
+  towerDamage(b: Building): number {
+    return (BUILDING_KINDS[b.kind].damage ?? 0) * (1 + 0.6 * (b.level - 1));
+  }
+  towerRange(b: Building): number {
+    return (BUILDING_KINDS[b.kind].range ?? 0) + (b.level - 1) * 1.5;
+  }
+  barracksCap(b: Building): number {
+    return (BUILDING_KINDS[b.kind].spawnCap ?? 0) + (b.level - 1);
+  }
+
+  private applySheepLevel(i: number, level: number, heal: boolean): void {
+    const k = UNIT_KINDS[this.units.kind[i]];
+    const mul = 1 + 0.5 * (level - 1);
+    this.units.maxHp[i] = k.hp * mul;
+    this.units.dmg[i] = k.damage * mul;
+    if (heal) this.units.hp[i] = this.units.maxHp[i];
+  }
+
+  buildingAtTile(tx: number, ty: number): Building | undefined {
+    if (!this.map.inBounds(tx, ty)) return undefined;
+    const id = this.occ[ty * this.map.w + tx];
+    return id >= 0 ? this.byId.get(id) : undefined;
+  }
+
+  isSolid(tx: number, ty: number): boolean {
+    if (!this.map.inBounds(tx, ty)) return true;
+    return this.map.tiles[ty * this.map.w + tx] !== Tile.Grass || this.occ[ty * this.map.w + tx] >= 0;
+  }
+
+  private recomputeFlow(): void {
+    const n = this.map.w * this.map.h;
+    for (let i = 0; i < n; i++) {
+      if (this.map.tiles[i] !== Tile.Grass) { this.costs[i] = Infinity; continue; }
+      const id = this.occ[i];
+      if (id < 0) { this.costs[i] = 1; continue; }
+      const b = this.byId.get(id)!;
+      this.costs[i] = b.kind === BK.Base ? 1 : 1 + b.hp / 25;
+    }
+    const goals: number[] = [];
+    for (let y = this.base.ty; y < this.base.ty + this.base.size; y++)
+      for (let x = this.base.tx; x < this.base.tx + this.base.size; x++) goals.push(y * this.map.w + x);
+    this.flow.compute(this.costs, goals);
+    this.flowDirty = false;
+  }
+
+  // ---------------------------------------------------------------- 單位 AI
+  private findTarget(i: number): number {
+    const u = this.units;
+    const k = UNIT_KINDS[u.kind[i]];
+    // 我方士兵以「集結點」為中心索敵 → 守住位置，不會被引走
+    const cx = u.team[i] === Team.Player ? u.homeX[i] : u.x[i];
+    const cy = u.team[i] === Team.Player ? u.homeY[i] : u.y[i];
+    const r = k.aggro;
+    const n = this.hash.queryInto(cx, cy, r, this.tmp);
+    let best = -1, bd = r * r;
+    const team = u.team[i];
+    for (let q = 0; q < n; q++) {
+      const j = this.tmp[q];
+      if (!u.alive[j] || u.team[j] === team) continue;
+      const dx = u.x[j] - u.x[i], dy = u.y[j] - u.y[i];
+      const d2 = dx * dx + dy * dy;
+      if (d2 < bd) { bd = d2; best = j; }
+    }
+    return best;
+  }
+
+  private updateUnits(dt: number): void {
+    const u = this.units, flow = this.flow, w = this.map.w, h = this.map.h;
+    const blend = Math.min(1, dt * 8);
+    const baseCx = this.base.tx + 1.5, baseCy = this.base.ty + 1.5;
+
+    for (let i = 0; i < u.hi; i++) {
+      if (!u.alive[i]) continue;
+      const k = UNIT_KINDS[u.kind[i]];
+      u.cd[i] -= dt;
+      if (u.hitT[i] > 0) u.hitT[i] -= dt;
+
+      let t = u.target[i];
+      if (t >= 0 && (!u.alive[t] || u.team[t] === u.team[i])) t = -1;
+      // 錯開每個單位的索敵時機，分散 CPU 負擔
+      if (t < 0 ? ((this.tick + i) & 7) === 0 : ((this.tick + i) & 15) === 0) t = this.findTarget(i);
+      u.target[i] = t;
+
+      const x = u.x[i], y = u.y[i];
+      let dx = 0, dy = 0, attacking = false;
+
+      if (t >= 0) {
+        const ex = u.x[t] - x, ey = u.y[t] - y;
+        const d = Math.hypot(ex, ey) || 0.001;
+        if (d <= u.rad[i] + u.rad[t] + k.reach) {
+          attacking = true;
+          u.face[i] = Math.atan2(ex, ey);
+          if (u.cd[i] <= 0) {
+            u.hp[t] -= u.dmg[i];
+            u.hitT[t] = 0.12;
+            u.cd[i] = k.attackCd;
+          }
+        } else { dx = ex / d; dy = ey / d; }
+      } else if (u.team[i] === Team.Enemy) {
+        const tx = Math.min(w - 1, Math.max(0, Math.floor(x)));
+        const ty = Math.min(h - 1, Math.max(0, Math.floor(y)));
+        let fx = flow.dirX[ty * w + tx], fy = flow.dirY[ty * w + tx];
+        if (fx === 0 && fy === 0) {
+          const bx = baseCx - x, by = baseCy - y, bd = Math.hypot(bx, by) || 1;
+          fx = bx / bd; fy = by / bd;
+        }
+        // 前方有建築 → 停下來拆
+        const px = x + fx * (u.rad[i] + 0.3), py = y + fy * (u.rad[i] + 0.3);
+        const b = this.buildingAtTile(Math.floor(px), Math.floor(py));
+        if (b) {
+          const cx = Math.max(b.tx, Math.min(x, b.tx + b.size));
+          const cy = Math.max(b.ty, Math.min(y, b.ty + b.size));
+          if (Math.hypot(x - cx, y - cy) <= u.rad[i] + k.reach + 0.15) {
+            attacking = true;
+            u.face[i] = Math.atan2(fx, fy);
+            if (u.cd[i] <= 0) {
+              b.hp -= u.dmg[i];
+              b.hitT = 0.12;
+              u.cd[i] = k.attackCd;
+            }
+          } else { dx = fx; dy = fy; }
+        } else { dx = fx; dy = fy; }
+      } else {
+        const hx = u.homeX[i] - x, hy = u.homeY[i] - y, d = Math.hypot(hx, hy);
+        if (d > 0.3) {
+          const s = Math.min(1, d);
+          dx = (hx / d) * s; dy = (hy / d) * s;
+        }
+      }
+
+      u.vx[i] += (dx * k.speed - u.vx[i]) * blend;
+      u.vy[i] += (dy * k.speed - u.vy[i]) * blend;
+      u.x[i] += u.vx[i] * dt;
+      u.y[i] += u.vy[i] * dt;
+      if (!attacking && u.vx[i] * u.vx[i] + u.vy[i] * u.vy[i] > 0.04) {
+        u.face[i] = lerpAngle(u.face[i], Math.atan2(u.vx[i], u.vy[i]), Math.min(1, dt * 10));
+      }
+    }
+  }
+
+  private updateBuildings(dt: number): void {
+    const u = this.units;
+    for (const b of this.buildings) {
+      if (b.hitT > 0) b.hitT -= dt;
+      const cx = b.tx + b.size / 2, cy = b.ty + b.size / 2;
+      if (b.kind === BK.Tower) {
+        b.cd -= dt;
+        if (b.cd > 0) continue;
+        const range = this.towerRange(b), r2 = range * range;
+        const n = this.hash.queryInto(cx, cy, range, this.tmp);
+        let best = -1, bestD = Infinity;
+        for (let q = 0; q < n; q++) {
+          const j = this.tmp[q];
+          if (!u.alive[j] || u.team[j] !== Team.Enemy) continue;
+          const dx = u.x[j] - cx, dy = u.y[j] - cy;
+          if (dx * dx + dy * dy > r2) continue;
+          // 優先打「離城堡最近」的敵人
+          const fd = this.flow.dist[Math.floor(u.y[j]) * this.map.w + Math.floor(u.x[j])];
+          if (fd < bestD) { bestD = fd; best = j; }
+        }
+        if (best >= 0) {
+          u.hp[best] -= this.towerDamage(b);
+          u.hitT[best] = 0.12;
+          this.shots.push({ x1: cx, y1: cy, x2: u.x[best], y2: u.y[best], t: 0.12 });
+          b.cd = BUILDING_KINDS[b.kind].cd ?? 1;
+        } else b.cd = 0.1;
+      } else if (b.kind === BK.Barracks) {
+        if (b.units >= this.barracksCap(b)) continue;
+        b.spawnT -= dt;
+        if (b.spawnT > 0) continue;
+        b.spawnT = 5;
+        // 從建築邊緣靠近集結點的位置出兵
+        const m = 0.45;
+        const sx = Math.max(b.tx - m, Math.min(b.rallyX, b.tx + b.size + m));
+        const sy = Math.max(b.ty - m, Math.min(b.rallyY, b.ty + b.size + m));
+        const i = u.spawn(UK.Sheep, sx, sy, b.id);
+        if (i >= 0) {
+          this.applySheepLevel(i, b.level, true);
+          u.homeX[i] = b.rallyX + this.rng.range(-0.8, 0.8);
+          u.homeY[i] = b.rallyY + this.rng.range(-0.8, 0.8);
+          b.units++;
+        }
+      }
+    }
+  }
+
+  // ---------------------------------------------------------------- 碰撞
+  private resolveCollisions(): void {
+    const u = this.units, hs = this.hash, cols = hs.cols, rows = hs.rows;
+    // 1) 單位之間互推（只比較附近 3x3 格）
+    for (let i = 0; i < u.hi; i++) {
+      if (!u.alive[i]) continue;
+      const c = hs.cellIndex(u.x[i], u.y[i]);
+      const cx = c % cols, cy = (c / cols) | 0;
+      const ri = u.rad[i], mi = ri * ri;
+      for (let yy = Math.max(0, cy - 1); yy <= Math.min(rows - 1, cy + 1); yy++) {
+        for (let xx = Math.max(0, cx - 1); xx <= Math.min(cols - 1, cx + 1); xx++) {
+          const cell = yy * cols + xx;
+          for (let p = hs.cellStart[cell], e = hs.cellStart[cell + 1]; p < e; p++) {
+            const j = hs.items[p];
+            if (j <= i || !u.alive[j]) continue;
+            let dx = u.x[j] - u.x[i], dy = u.y[j] - u.y[i];
+            const rj = u.rad[j], min = ri + rj;
+            let d2 = dx * dx + dy * dy;
+            if (d2 >= min * min) continue;
+            if (d2 < 1e-8) { dx = Math.random() - 0.5; dy = Math.random() - 0.5; d2 = dx * dx + dy * dy; }
+            const d = Math.sqrt(d2);
+            const push = (min - d) * 0.8;
+            const nx = dx / d, ny = dy / d;
+            const mj = rj * rj, wi = mj / (mi + mj); // 大隻的比較推不動
+            u.x[i] -= nx * push * wi; u.y[i] -= ny * push * wi;
+            u.x[j] += nx * push * (1 - wi); u.y[j] += ny * push * (1 - wi);
+          }
+        }
+      }
+    }
+    // 2) 單位 vs 地形/建築（圓與方格）
+    const W = this.map.w, H = this.map.h;
+    for (let i = 0; i < u.hi; i++) {
+      if (!u.alive[i]) continue;
+      const r = u.rad[i];
+      let x = u.x[i], y = u.y[i];
+      const x0 = Math.floor(x - r), x1 = Math.floor(x + r), y0 = Math.floor(y - r), y1 = Math.floor(y + r);
+      for (let ty = y0; ty <= y1; ty++) {
+        for (let tx = x0; tx <= x1; tx++) {
+          if (!this.isSolid(tx, ty)) continue;
+          const px = Math.max(tx, Math.min(x, tx + 1)), py = Math.max(ty, Math.min(y, ty + 1));
+          const dx = x - px, dy = y - py, d2 = dx * dx + dy * dy;
+          if (d2 >= r * r) continue;
+          if (d2 > 1e-8) {
+            const d = Math.sqrt(d2), k = (r - d) / d;
+            x += dx * k; y += dy * k;
+          } else {
+            // 中心在方格內：往最近的邊推出去
+            const l = x - tx, rr = tx + 1 - x, t = y - ty, b = ty + 1 - y;
+            const m = Math.min(l, rr, t, b);
+            if (m === l) x = tx - r; else if (m === rr) x = tx + 1 + r; else if (m === t) y = ty - r; else y = ty + 1 + r;
+          }
+        }
+      }
+      u.x[i] = Math.max(r, Math.min(W - r, x));
+      u.y[i] = Math.max(r, Math.min(H - r, y));
+    }
+  }
+
+  private cleanup(dt: number): void {
+    const u = this.units;
+    for (let i = 0; i < u.hi; i++) {
+      if (!u.alive[i] || u.hp[i] > 0) continue;
+      if (u.team[i] === Team.Enemy) {
+        this.gold += UNIT_KINDS[u.kind[i]].reward;
+        this.kills++;
+      }
+      if (u.owner[i] >= 0) {
+        const b = this.byId.get(u.owner[i]);
+        if (b) b.units--;
+      }
+      u.kill(i);
+    }
+    for (const b of this.buildings) {
+      if (b.hp > 0) continue;
+      if (b.kind === BK.Base) { b.hp = 0; this.gameOver = true; }
+    }
+    const dead = this.buildings.filter((b) => b.hp <= 0 && b.kind !== BK.Base);
+    for (const b of dead) this.removeBuilding(b, false);
+    for (const s of this.shots) s.t -= dt;
+    if (this.shots.length) this.shots = this.shots.filter((s) => s.t > 0);
+  }
+}
+
+function lerpAngle(a: number, b: number, t: number): number {
+  let d = b - a;
+  while (d > Math.PI) d -= Math.PI * 2;
+  while (d < -Math.PI) d += Math.PI * 2;
+  return a + d * t;
+}
