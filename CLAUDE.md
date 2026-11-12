@@ -2,7 +2,8 @@
 
 使用者自己玩的 3D 塔防遊戲，會長期慢慢開發。溝通使用繁體中文。
 
-- 遊戲設計想法都記在 `docs/ideas.md`（💡 點子／✅ 確定要做／🎉 已完成）；使用者希望規則簡單、不要太細節
+- **設計總覽在 `docs/design.md`**（整理過、有待決定問題和開發順序）；逐條原始想法在 `docs/ideas.md`。新想法先記進 ideas.md，再同步更新 design.md
+- 使用者希望規則簡單、不要太細節
 
 - 參考作品：They Are Billions（大量屍潮、拆牆）、要戰便戰、Wool at the Gates（毛線/針織手工風）
 - 技術：TypeScript + Vite + Three.js，開發者面板用 lil-gui

@@ -23,4 +23,4 @@ npm run dev
 
 ## 技術
 
-TypeScript + Vite + Three.js。架構說明見 [CLAUDE.md](CLAUDE.md)，遊戲設計想法見 [docs/ideas.md](docs/ideas.md)。
+TypeScript + Vite + Three.js。架構說明見 [CLAUDE.md](CLAUDE.md)，遊戲設計總覽見 [docs/design.md](docs/design.md)，逐條原始想法見 [docs/ideas.md](docs/ideas.md)。
