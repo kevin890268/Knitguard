@@ -50,6 +50,18 @@ const building = (id: string, label: string, kind: number, height: number, extra
 
 export const ART_SLOTS: ArtSlot[] = [
   unit('sheep', '綿羊兵（羊人）', UK.Sheep, 'front', { height: 1.2, depth: 0.3, bgTolerance: 30 }),
+  // 新兵種：2D 版用 public/sprites/<id>/ 的設定圖多視角（見 docs/art-pipeline.md）
+  unit('lancer', '長槍兵', UK.Lancer, 'front', { height: 1.2, bgTolerance: 30 }),
+  unit('archer', '弓箭手', UK.Archer, 'front', { height: 1.15, bgTolerance: 26 }),
+  unit('catapult', '投石車', UK.Catapult, 'front', { height: 1.1, bgTolerance: 26 }),
+  unit('horn', '號角手', UK.Horn, 'front', { height: 1.15, bgTolerance: 26 }),
+  unit('spineball', '刺球衛', UK.Spineball, 'front', { height: 1.1, bgTolerance: 26 }),
+  unit('javelin', '豪豬標槍手', UK.Javelin, 'front', { height: 1.15, bgTolerance: 26 }),
+  unit('ballista', '尖刺弩砲', UK.Ballista, 'front', { height: 1.0, bgTolerance: 26 }),
+  unit('trapper', '陷阱工程師', UK.Trapper, 'front', { height: 1.1, bgTolerance: 26 }),
+  unit('dogcav', '狗狗騎兵', UK.DogCav, 'front', { height: 1.0, bgTolerance: 26 }),
+  unit('barker', '吠叫兵', UK.Barker, 'front', { height: 1.0, bgTolerance: 26 }),
+  unit('stbernard', '聖伯納救援犬', UK.StBernard, 'front', { height: 1.0, bgTolerance: 26 }),
   unit('fuzz', '毛球怪', UK.Fuzz, 'front', { depth: 0.4 }),
   unit('runner', '飛毛蟲', UK.Runner, 'side'),
   unit('brute', '大毛怪', UK.Brute, 'front', { height: 1.3, depth: 0.38 }),

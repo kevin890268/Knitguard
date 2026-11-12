@@ -29,6 +29,15 @@ export class Units {
   readonly alive: Uint8Array;
   readonly target: Int32Array;
   readonly owner: Int32Array;
+  /** 號角手給的攻擊加成（每 tick 重算） */
+  readonly buff: Float32Array;
+  /** 被減速剩下的秒數（吠叫、陷阱） */
+  readonly slowT: Float32Array;
+  /** 刺球衛：是否縮成球、離開戰鬥後多久張開 */
+  readonly curled: Uint8Array;
+  readonly curlT: Float32Array;
+  /** 技能冷卻（陷阱、治療） */
+  readonly skillT: Float32Array;
 
   private free: number[] = [];
 
@@ -38,6 +47,8 @@ export class Units {
     this.vx = f(); this.vy = f(); this.hp = f(); this.maxHp = f();
     this.dmg = f(); this.rad = f(); this.cd = f(); this.face = f();
     this.hitT = f(); this.homeX = f(); this.homeY = f();
+    this.buff = f(); this.slowT = f(); this.curlT = f(); this.skillT = f();
+    this.curled = new Uint8Array(cap);
     this.kind = new Uint8Array(cap);
     this.team = new Uint8Array(cap);
     this.alive = new Uint8Array(cap);
@@ -60,6 +71,8 @@ export class Units {
     this.cd[i] = Math.random() * k.attackCd;
     this.face[i] = Math.random() * Math.PI * 2;
     this.hitT[i] = 0;
+    this.buff[i] = this.slowT[i] = this.curlT[i] = this.skillT[i] = 0;
+    this.curled[i] = 0;
     this.kind[i] = kind;
     this.team[i] = k.team;
     this.alive[i] = 1;

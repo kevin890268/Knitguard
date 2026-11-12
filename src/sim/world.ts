@@ -3,7 +3,7 @@ import { GameMap, Tile } from './map';
 import { Units } from './units';
 import { SpatialHash } from './spatialHash';
 import { FlowField } from './flowfield';
-import { BK, BUILDING_KINDS, ECON, MAX_LEVEL, Team, UK, UNIT_KINDS } from './data';
+import { Armor, BK, BUILDING_KINDS, ECON, MAX_LEVEL, PROJ, SLOW, Team, UK, UNIT_KINDS, type ProjKind } from './data';
 
 export interface Building {
   id: number;
@@ -24,9 +24,26 @@ export interface Building {
   dead: boolean;
 }
 
+/**
+ * 飛行中的彈道（只給繪圖用；傷害由 flights 在飛到時結算）。
+ * t＝剩下的秒數，dur＝總飛行時間 → 進度 = 1 − t/dur
+ */
 export interface Shot {
   x1: number; y1: number; x2: number; y2: number; t: number;
+  dur: number;
+  /** 起點高度（預設 1.8＝箭塔頂） */
+  h1?: number;
+  kind: ProjKind;
 }
+
+/** 已發射、還沒飛到的遠程攻擊：到 at 時間時，如果攻擊者和目標都還活著就扣血 */
+interface Flight { at: number; i: number; t: number; }
+
+/** 陷阱工程師放的陷阱 */
+export interface Trap { x: number; y: number; owner: number; }
+
+/** 一閃而過的範圍效果（吠叫、治療、號角），只給繪圖用 */
+export interface Fx { x: number; y: number; r: number; t: number; kind: 'bark' | 'heal' | 'horn' | 'trap'; }
 
 export const MAX_UNITS = 12000;
 
@@ -60,6 +77,13 @@ export class World {
 
   buildingsVersion = 0;
   shots: Shot[] = [];
+  traps: Trap[] = [];
+  fx: Fx[] = [];
+  private flights: Flight[] = [];
+  /** 自訂每一波的敵人數量（DEMO 用）；沒設定就用公式 */
+  waveSizes: number[] | null = null;
+  /** 自訂波次的組成比例：[毛球怪, 飛毛蟲, 大毛怪] */
+  waveMix: [number, number, number] = [0.6, 0.3, 0.1];
   spawnPoints: number[] = [];
 
   private costs: Float32Array;
@@ -130,10 +154,11 @@ export class World {
     this.wave++;
     this.waveTimer = this.waveInterval;
     const w = this.wave;
-    this.spawnHorde(Math.round(12 + w * 8 + w * w * 1.5));
+    const custom = this.waveSizes?.[w - 1];
+    this.spawnHorde(custom ?? Math.round(12 + w * 8 + w * w * 1.5), custom !== undefined);
   }
 
-  spawnHorde(count: number): void {
+  spawnHorde(count: number, useMix = false): void {
     if (!this.spawnPoints.length) return;
     const clusters: number[] = [];
     const nc = 1 + Math.min(3, Math.floor(this.wave / 3));
@@ -143,10 +168,16 @@ export class World {
       const sp = clusters[n % clusters.length];
       let x = (sp % w) + 0.5 + this.rng.range(-2, 2);
       let y = Math.floor(sp / w) + 0.5 + this.rng.range(-2, 2);
-      if (this.isSolid(Math.floor(x), Math.floor(y))) { x = (sp % w) + 0.5; y = Math.floor(sp / w) + 0.5; }
+      // 隨機偏移後要確認還走得到城堡：偏移可能把敵人丟進被石頭圍住的封閉小區域，那裡流場沒有方向，敵人會卡住
+      const ti = Math.floor(y) * w + Math.floor(x);
+      if (this.isSolid(Math.floor(x), Math.floor(y)) || !(this.flow.dist[ti] < Infinity)) { x = (sp % w) + 0.5; y = Math.floor(sp / w) + 0.5; }
       const r = this.rng.next();
       let kind: number = UK.Fuzz;
-      if (this.wave >= 4 && r < 0.05 + this.wave * 0.005) kind = UK.Brute;
+      if (useMix) {
+        const [, runner, brute] = this.waveMix;
+        if (r < brute) kind = UK.Brute;
+        else if (r < brute + runner) kind = UK.Runner;
+      } else if (this.wave >= 4 && r < 0.05 + this.wave * 0.005) kind = UK.Brute;
       else if (this.wave >= 2 && r < 0.3) kind = UK.Runner;
       this.spawnQueue.push(kind, x, y);
     }
@@ -326,21 +357,202 @@ export class World {
     return best;
   }
 
+  // ---------------------------------------------------------------- 傷害
+  /**
+   * i 打 t 一下。傷害 = 攻擊 + 對護甲加成 + 對大型加成 + 號角加成 − 對應的防禦（至少 1）。
+   * 近戰打到縮著的刺球衛會被反傷。
+   */
+  private hit(i: number, t: number, ranged: boolean): void {
+    const u = this.units, ka = UNIT_KINDS[u.kind[i]], kt = UNIT_KINDS[u.kind[t]];
+    let dmg = u.dmg[i] + u.buff[i];
+    if ((kt.armor ?? Armor.Light) === Armor.Heavy) dmg += ka.bonusHeavy ?? 0;
+    else dmg += ka.bonusLight ?? 0;
+    if (u.rad[t] >= 0.45) dmg += ka.bonusLarge ?? 0;
+    let def = ranged ? kt.rangedDef ?? 0 : kt.meleeDef ?? 0;
+    const curl = kt.skill?.type === 'curl' && u.curled[t] ? kt.skill : null;
+    if (curl) def += curl.def;
+    u.hp[t] -= Math.max(1, dmg - def);
+    u.hitT[t] = 0.12;
+    if (curl && !ranged) { u.hp[i] -= curl.reflect; u.hitT[i] = 0.12; }
+  }
+
+  /** 尖刺弩砲：從 i 往 t 的方向射一根刺，打中整條線上的敵人 */
+  private pierce(i: number, t: number, range: number, width: number): void {
+    const u = this.units, x = u.x[i], y = u.y[i];
+    let dx = u.x[t] - x, dy = u.y[t] - y;
+    const d = Math.hypot(dx, dy) || 1;
+    dx /= d; dy /= d;
+    const mx = x + dx * range / 2, my = y + dy * range / 2;
+    const n = this.hash.queryInto(mx, my, range / 2 + width, this.tmp);
+    for (let q = 0; q < n; q++) {
+      const j = this.tmp[q];
+      if (!u.alive[j] || u.team[j] === u.team[i]) continue;
+      const rx = u.x[j] - x, ry = u.y[j] - y;
+      const along = rx * dx + ry * dy;
+      if (along < 0 || along > range) continue;
+      if (Math.abs(rx * dy - ry * dx) > width + u.rad[j]) continue;
+      this.hit(i, j, true);
+    }
+    const dur = range / PROJ.spike.speed;
+    this.shots.push({ x1: x, y1: y, x2: x + dx * range, y2: y + dy * range, t: dur, dur, h1: 0.5, kind: 'spike' });
+  }
+
+  /** 遠程發射：畫面上飛一段時間，飛到才扣血 */
+  private launch(i: number, t: number, kind: ProjKind): void {
+    const u = this.units;
+    const d = Math.hypot(u.x[t] - u.x[i], u.y[t] - u.y[i]);
+    const dur = Math.max(0.08, d / PROJ[kind].speed);
+    this.shots.push({ x1: u.x[i], y1: u.y[i], x2: u.x[t], y2: u.y[t], t: dur, dur, h1: 0.6, kind });
+    this.flights.push({ at: this.time + dur, i, t });
+  }
+
+  /** 飛到的遠程攻擊結算 */
+  private landFlights(): void {
+    if (!this.flights.length) return;
+    const u = this.units;
+    this.flights = this.flights.filter((f) => {
+      if (f.at > this.time) return true;
+      if (u.alive[f.i] && u.alive[f.t] && u.team[f.i] !== u.team[f.t]) this.hit(f.i, f.t, true);
+      return false;
+    });
+  }
+
+  /** 每 tick 先算的技能狀態：號角加成、刺球衛縮球、治療、陷阱、減速倒數 */
+  private updateSkills(dt: number): void {
+    const u = this.units;
+    for (let i = 0; i < u.hi; i++) {
+      if (!u.alive[i]) continue;
+      u.buff[i] = 0;
+      if (u.slowT[i] > 0) u.slowT[i] -= dt;
+    }
+    for (let i = 0; i < u.hi; i++) {
+      if (!u.alive[i]) continue;
+      const s = UNIT_KINDS[u.kind[i]].skill;
+      if (!s) continue;
+      const x = u.x[i], y = u.y[i], team = u.team[i];
+      if (s.type === 'horn') {
+        const n = this.hash.queryInto(x, y, s.radius, this.tmp);
+        for (let q = 0; q < n; q++) {
+          const j = this.tmp[q];
+          if (u.alive[j] && u.team[j] === team && j !== i) u.buff[j] = Math.max(u.buff[j], s.atk);
+        }
+        if (((this.tick + i) % 45) === 0) this.fx.push({ x, y, r: s.radius, t: 0.4, kind: 'horn' });
+      } else if (s.type === 'curl') {
+        // 附近有敵人就縮球；敵人離開 1.5 秒後才張開
+        let near = false;
+        const n = this.hash.queryInto(x, y, s.radius, this.tmp);
+        for (let q = 0; q < n && !near; q++) {
+          const j = this.tmp[q];
+          if (u.alive[j] && u.team[j] !== team) near = true;
+        }
+        if (near) { u.curled[i] = 1; u.curlT[i] = 1.5; }
+        else if (u.curled[i] && (u.curlT[i] -= dt) <= 0) u.curled[i] = 0;
+      } else if (s.type === 'heal') {
+        if ((u.skillT[i] -= dt) > 0) continue;
+        const n = this.hash.queryInto(x, y, s.radius, this.tmp);
+        let best = -1, lack = 1;
+        for (let q = 0; q < n; q++) {
+          const j = this.tmp[q];
+          if (!u.alive[j] || u.team[j] !== team) continue;
+          const l = u.maxHp[j] - u.hp[j];
+          if (l > lack) { lack = l; best = j; }
+        }
+        if (best >= 0) {
+          u.hp[best] = Math.min(u.maxHp[best], u.hp[best] + s.amount);
+          this.fx.push({ x: u.x[best], y: u.y[best], r: 0.5, t: 0.4, kind: 'heal' });
+          u.skillT[i] = s.cd;
+        } else u.skillT[i] = 0.3;
+      } else if (s.type === 'trap') {
+        if ((u.skillT[i] -= dt) > 0) continue;
+        u.skillT[i] = 0.5;
+        let mine = 0;
+        for (const tr of this.traps) if (tr.owner === i) mine++;
+        if (mine >= s.max) continue;
+        // 往最近的敵人方向，在 40% 的地方放陷阱
+        const r = UNIT_KINDS[u.kind[i]].aggro;
+        const n = this.hash.queryInto(u.homeX[i], u.homeY[i], r, this.tmp);
+        let best = -1, bd = r * r;
+        for (let q = 0; q < n; q++) {
+          const j = this.tmp[q];
+          if (!u.alive[j] || u.team[j] === team) continue;
+          const d2 = (u.x[j] - x) ** 2 + (u.y[j] - y) ** 2;
+          if (d2 < bd) { bd = d2; best = j; }
+        }
+        if (best < 0) continue;
+        const tx = x + (u.x[best] - x) * 0.4, ty = y + (u.y[best] - y) * 0.4;
+        if (this.isSolid(Math.floor(tx), Math.floor(ty))) continue;
+        this.traps.push({ x: tx, y: ty, owner: i });
+        this.fx.push({ x: tx, y: ty, r: 0.6, t: 0.3, kind: 'trap' });
+        u.skillT[i] = s.cd;
+      }
+    }
+    // 陷阱：敵人踩到就觸發（受傷＋減速），陷阱消失
+    if (this.traps.length) {
+      this.traps = this.traps.filter((tr) => {
+        if (!u.alive[tr.owner]) return false;
+        const s = UNIT_KINDS[u.kind[tr.owner]].skill;
+        const n = this.hash.queryInto(tr.x, tr.y, 0.6, this.tmp);
+        for (let q = 0; q < n; q++) {
+          const j = this.tmp[q];
+          if (!u.alive[j] || u.team[j] === u.team[tr.owner]) continue;
+          if ((u.x[j] - tr.x) ** 2 + (u.y[j] - tr.y) ** 2 > (0.35 + u.rad[j]) ** 2) continue;
+          u.hp[j] -= s?.type === 'trap' ? s.dmg : 10;
+          u.hitT[j] = 0.12;
+          u.slowT[j] = SLOW.dur;
+          this.fx.push({ x: tr.x, y: tr.y, r: 0.8, t: 0.3, kind: 'trap' });
+          return false;
+        }
+        return true;
+      });
+    }
+  }
+
+  /** 附近（由近到遠，最多 6 格）第一圈裡流場距離最短、可走的格子索引；找不到回傳 -1 */
+  private escapeTile(x: number, y: number): number {
+    const w = this.map.w, tx0 = Math.floor(x), ty0 = Math.floor(y);
+    if (this.buildingAtTile(tx0, ty0) === this.base) return -1;
+    let best = -1, bestD = Infinity;
+    for (let r = 1; r <= 6 && best < 0; r++) {
+      for (let dy = -r; dy <= r; dy++) for (let dx = -r; dx <= r; dx++) {
+        if (Math.max(Math.abs(dx), Math.abs(dy)) !== r) continue; // 只看這一圈
+        const tx = tx0 + dx, ty = ty0 + dy;
+        if (!this.map.inBounds(tx, ty) || this.isSolid(tx, ty)) continue;
+        const d = this.flow.dist[ty * w + tx];
+        if (d < bestD) { bestD = d; best = ty * w + tx; }
+      }
+    }
+    return best;
+  }
+
+  /** 往 escapeTile 的方向 */
+  private escapeDir(x: number, y: number): [number, number] | null {
+    const w = this.map.w, best = this.escapeTile(x, y);
+    if (best < 0) return null;
+    const ex = (best % w) + 0.5 - x, ey = Math.floor(best / w) + 0.5 - y, d = Math.hypot(ex, ey) || 1;
+    return [ex / d, ey / d];
+  }
+
   private updateUnits(dt: number): void {
     const u = this.units, flow = this.flow, w = this.map.w, h = this.map.h;
     const blend = Math.min(1, dt * 8);
     const baseCx = this.base.tx + 1.5, baseCy = this.base.ty + 1.5;
+    this.updateSkills(dt);
+    this.landFlights();
 
     for (let i = 0; i < u.hi; i++) {
       if (!u.alive[i]) continue;
       const k = UNIT_KINDS[u.kind[i]];
-      u.cd[i] -= dt;
+      const slowed = u.slowT[i] > 0;
+      u.cd[i] -= slowed ? dt * (1 - SLOW.attack) : dt;
       if (u.hitT[i] > 0) u.hitT[i] -= dt;
 
       let t = u.target[i];
-      if (t >= 0 && (!u.alive[t] || u.team[t] === u.team[i])) t = -1;
-      // 錯開每個單位的索敵時機，分散 CPU 負擔
-      if (t < 0 ? ((this.tick + i) & 7) === 0 : ((this.tick + i) & 15) === 0) t = this.findTarget(i);
+      if (k.support) t = -1;
+      else {
+        if (t >= 0 && (!u.alive[t] || u.team[t] === u.team[i])) t = -1;
+        // 錯開每個單位的索敵時機，分散 CPU 負擔
+        if (t < 0 ? ((this.tick + i) & 7) === 0 : ((this.tick + i) & 15) === 0) t = this.findTarget(i);
+      }
       u.target[i] = t;
 
       const x = u.x[i], y = u.y[i];
@@ -349,22 +561,50 @@ export class World {
       if (t >= 0) {
         const ex = u.x[t] - x, ey = u.y[t] - y;
         const d = Math.hypot(ex, ey) || 0.001;
-        if (d <= u.rad[i] + u.rad[t] + k.reach) {
+        const ranged = (k.range ?? 0) > 0;
+        const reach = ranged ? k.range! : k.reach;
+        if (d <= u.rad[i] + u.rad[t] + reach) {
           attacking = true;
           u.face[i] = Math.atan2(ex, ey);
           if (u.cd[i] <= 0) {
-            u.hp[t] -= u.dmg[i];
-            u.hitT[t] = 0.12;
             u.cd[i] = k.attackCd;
+            if (k.skill?.type === 'pierce') this.pierce(i, t, k.range!, k.skill.width);
+            else if (k.skill?.type === 'bark') {
+              // 對自己周圍吼叫：範圍內的敵人都變慢，並受到一點傷害
+              const n = this.hash.queryInto(x, y, k.skill.radius, this.tmp);
+              for (let q = 0; q < n; q++) {
+                const j = this.tmp[q];
+                if (!u.alive[j] || u.team[j] === u.team[i]) continue;
+                u.slowT[j] = SLOW.dur;
+                this.hit(i, j, true);
+              }
+              this.fx.push({ x, y, r: k.skill.radius, t: 0.35, kind: 'bark' });
+            } else if (ranged && k.proj) this.launch(i, t, k.proj);
+            else this.hit(i, t, ranged);
           }
         } else { dx = ex / d; dy = ey / d; }
       } else if (u.team[i] === Team.Enemy) {
         const tx = Math.min(w - 1, Math.max(0, Math.floor(x)));
         const ty = Math.min(h - 1, Math.max(0, Math.floor(y)));
         let fx = flow.dirX[ty * w + tx], fy = flow.dirY[ty * w + tx];
-        if (fx === 0 && fy === 0) {
-          const bx = baseCx - x, by = baseCy - y, bd = Math.hypot(bx, by) || 1;
-          fx = bx / bd; fy = by / bd;
+        if (fx !== 0 || fy !== 0) u.skillT[i] = 0;
+        else {
+          // 這格沒有流場方向：可能是被擠進石頭圍住的小空地（從對角的縫鑽進來）。
+          // 先找附近走得到城堡的格子脫困；找不到才直直朝城堡走
+          const esc = this.escapeDir(x, y);
+          if (esc) {
+            fx = esc[0]; fy = esc[1];
+            // 卡住偵測：在走不到城堡的格子上待超過 1.5 秒（通常是被擠進對角的縫，出不來）→ 直接移到最近的可達格子
+            // 敵人沒有技能，借用 skillT 當計時器
+            if ((u.skillT[i] += dt) > 1.5) {
+              const tile = this.escapeTile(x, y);
+              if (tile >= 0) { u.x[i] = u.px[i] = (tile % w) + 0.5; u.y[i] = u.py[i] = Math.floor(tile / w) + 0.5; }
+              u.skillT[i] = 0;
+            }
+          } else {
+            const bx = baseCx - x, by = baseCy - y, bd = Math.hypot(bx, by) || 1;
+            fx = bx / bd; fy = by / bd;
+          }
         }
         // 前方有建築 → 停下來拆
         const px = x + fx * (u.rad[i] + 0.3), py = y + fy * (u.rad[i] + 0.3);
@@ -390,8 +630,11 @@ export class World {
         }
       }
 
-      u.vx[i] += (dx * k.speed - u.vx[i]) * blend;
-      u.vy[i] += (dy * k.speed - u.vy[i]) * blend;
+      let speed = k.speed;
+      if (slowed) speed *= 1 - SLOW.move;
+      if (u.curled[i] && k.skill?.type === 'curl') speed *= 1 - k.skill.slow;
+      u.vx[i] += (dx * speed - u.vx[i]) * blend;
+      u.vy[i] += (dy * speed - u.vy[i]) * blend;
       u.x[i] += u.vx[i] * dt;
       u.y[i] += u.vy[i] * dt;
       if (!attacking && u.vx[i] * u.vx[i] + u.vy[i] * u.vy[i] > 0.04) {
@@ -423,7 +666,9 @@ export class World {
         if (best >= 0) {
           u.hp[best] -= this.towerDamage(b);
           u.hitT[best] = 0.12;
-          this.shots.push({ x1: cx, y1: cy, x2: u.x[best], y2: u.y[best], t: 0.12 });
+          // 箭塔：傷害立刻算（箭很快），畫面上飛一支箭
+          const dur = Math.max(0.08, Math.hypot(u.x[best] - cx, u.y[best] - cy) / PROJ.arrow.speed);
+          this.shots.push({ x1: cx, y1: cy, x2: u.x[best], y2: u.y[best], t: dur, dur, kind: 'arrow' });
           b.cd = BUILDING_KINDS[b.kind].cd ?? 1;
         } else b.cd = 0.1;
       } else if (b.kind === BK.Barracks) {
@@ -527,6 +772,8 @@ export class World {
     for (const b of dead) this.removeBuilding(b, false);
     for (const s of this.shots) s.t -= dt;
     if (this.shots.length) this.shots = this.shots.filter((s) => s.t > 0);
+    for (const f of this.fx) f.t -= dt;
+    if (this.fx.length) this.fx = this.fx.filter((f) => f.t > 0);
   }
 }
 

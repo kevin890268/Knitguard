@@ -44,13 +44,46 @@ let lastSpray = 0;
 // ---------------------------------------------------------------- DEMO 設定
 /** DEMO：撐過 5 波就贏。網址加 ?dev 顯示開發者沙盒和除錯工具（或按 ` 鍵） */
 const DEV = new URLSearchParams(location.search).has('dev');
-const DEMO = { victoryWave: 5, firstWave: 35, interval: 40 };
+/**
+ * DEMO：新兵種每種各 10 隻擺在城堡旁邊，防守 2 波（第 1 波大、第 2 波小）。
+ * 排法：近戰最外圈、短程和輔助中間、長程最內圈。
+ */
+const DEMO = {
+  waves: [900, 300], // 第 1 波大、第 2 波小
+  mix: [0.55, 0.3, 0.15] as [number, number, number], // 毛球怪、飛毛蟲、大毛怪
+  firstWave: 25,
+  interval: 45,
+  perKind: 10,
+  rings: [
+    { r: 5.4, kinds: [UK.Lancer, UK.Spineball, UK.DogCav] },
+    { r: 4.2, kinds: [UK.Javelin, UK.Barker, UK.Trapper] },
+    { r: 3.4, kinds: [UK.Horn, UK.StBernard] },
+    { r: 2.7, kinds: [UK.Archer, UK.Catapult, UK.Ballista] },
+  ],
+};
 let started = false;
 
 function setupWorld(w: World): void {
-  w.victoryWave = DEMO.victoryWave;
+  w.victoryWave = DEMO.waves.length;
+  w.waveSizes = DEMO.waves;
+  w.waveMix = DEMO.mix;
   w.waveTimer = DEMO.firstWave;
   w.waveInterval = DEMO.interval;
+  const cx = w.map.baseX + 1.5, cy = w.map.baseY + 1.5;
+  for (const ring of DEMO.rings) {
+    const n = ring.kinds.length * DEMO.perKind;
+    for (let s = 0; s < n; s++) {
+      const kind = ring.kinds[s % ring.kinds.length]; // 不同兵種交錯排
+      const a = (s / n) * Math.PI * 2;
+      // 落在石頭、水、樹上就往外挪一點
+      let r = ring.r, x = cx, y = cy;
+      for (let tries = 0; tries < 6; tries++, r += 0.5) {
+        x = cx + Math.cos(a) * r; y = cy + Math.sin(a) * r;
+        if (!w.isSolid(Math.floor(x), Math.floor(y))) break;
+      }
+      w.spawnUnitAt(kind, x, y);
+    }
+  }
 }
 setupWorld(world);
 

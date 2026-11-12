@@ -1,7 +1,7 @@
 import * as THREE from 'three';
-import { BK, BUILDING_KINDS, UNIT_KINDS } from '../sim/data';
+import { BK, BUILDING_KINDS, PROJ, UNIT_KINDS, type ProjKind } from '../sim/data';
 import { Tile } from '../sim/map';
-import type { Building, World } from '../sim/world';
+import type { Building, Shot, World } from '../sim/world';
 import { ArtLibrary } from '../render/art/library';
 import type { ArtSlot } from '../render/art/manifest';
 import { buildingMesh, unitGeometry } from '../render/models';
@@ -52,6 +52,11 @@ export class Renderer2D {
   private unitFlash: Sprite[][] = [];
   /** 從設定圖做的 8 方向圖（public/sprites/），有就優先用 */
   private viewSprites: Sprite[][] = [];
+  /** 彈道圖片（箭、標槍、石頭） */
+  private projSprites: Partial<Record<ProjKind, { img: HTMLCanvasElement; w: number; h: number; angle: number }>> = {};
+  /** 刺球衛縮成球時的圖 */
+  private curlSprites: Sprite[][] = [];
+  private curlFlash: Sprite[][] = [];
   private buildingSprites = new Map<string, Sprite>();
   private treeSprites: Sprite[] = [];
   private rockSprites: Sprite[] = [];
@@ -75,6 +80,7 @@ export class Renderer2D {
     this.art.onChange((slot) => this.onArt(slot));
     void this.art.loadAll();
     void this.loadViewSprites();
+    void this.loadProjectiles();
     addEventListener('resize', () => this.resize());
     this.resize();
   }
@@ -129,6 +135,17 @@ export class Renderer2D {
       this.viewSprites[i] = spritesFromViews(cut, slot.height * k.scale * HEIGHT_PX);
       this.bakeUnits(i);
       console.info(`🖼️ ${slot.label}：用設定圖（${Object.keys(cut).join('、')}）當 8 方向圖`);
+      // 縮球形態（刺球衛）：public/sprites/<id>_curl/
+      if (k.skill?.type === 'curl') {
+        const ci = await Promise.all(VIEW_FILES.map((n) => loadImage(`${base}${slot.id}_curl/${n}.png${bust}`)));
+        const cc: Partial<Record<ViewName, Cutout>> = {};
+        VIEW_FILES.forEach((n, j) => { const im = ci[j]; const c = im ? makeCutout(im, slot.bgTolerance) : null; if (c) cc[n] = c; });
+        if (cc.front) {
+          const dirs = spritesFromViews(cc, slot.height * k.scale * HEIGHT_PX * 0.85);
+          this.curlSprites[i] = dirs;
+          this.curlFlash[i] = dirs.map((s) => tintSprite(s, '#ff4040', 0.45));
+        }
+      }
     }));
   }
 
@@ -266,6 +283,7 @@ export class Renderer2D {
     }
     if (this.showFlow) this.drawFlow(g);
     this.drawGroundMarks(g);
+    this.drawTraps(g);
 
     // 收集要畫的東西，依「離鏡頭的遠近」（x+y）排序：後面的先畫
     const items: { k: number; draw: () => void }[] = [];
@@ -294,7 +312,8 @@ export class Renderer2D {
       const moving = u.vx[i] * u.vx[i] + u.vy[i] * u.vy[i] > 0.05;
       const bob = moving ? Math.abs(Math.sin(t * 12 + i)) * 0.12 * kind.scale : 0;
       const dir = ((Math.round(u.face[i] / ((Math.PI * 2) / DIRS)) % DIRS) + DIRS) % DIRS;
-      const sp = (u.hitT[i] > 0 ? this.unitFlash : this.unitSprites)[k][dir];
+      const curl = u.curled[i] && this.curlSprites[k];
+      const sp = (u.hitT[i] > 0 ? (curl ? this.curlFlash : this.unitFlash) : (curl ? this.curlSprites : this.unitSprites))[k][dir];
       if (this.unitShadows) shadows.push([sx, sy, kind.radius * 1.3]);
       items.push({ k: x + y, draw: () => this.drawSprite(g, sp, sx, sy - bob * HEIGHT_PX, 1, false) });
     }
@@ -310,6 +329,7 @@ export class Renderer2D {
     this.drawn = items.length;
 
     this.drawShots(g);
+    this.drawFx(g);
     this.drawSelectionTop(g);
   }
 
@@ -392,17 +412,97 @@ export class Renderer2D {
     g.fillRect(sx - w / 2, sy, w * Math.max(0, r), 4);
   }
 
+  /** 飛行中的箭、標槍、石頭、尖刺：沿拋物線飛，圖片轉向飛行方向 */
   private drawShots(g: CanvasRenderingContext2D): void {
     const shots = this.world.shots;
     if (!shots.length) return;
-    g.strokeStyle = '#ff6f91';
-    g.lineWidth = 1.5;
-    g.beginPath();
+    const at = (s: Shot, p: number): [number, number] => {
+      const arc = PROJ[s.kind].arc;
+      const h = (s.h1 ?? 1.8) * (1 - p) + 0.35 * p + arc * 4 * p * (1 - p);
+      return toScreen(s.x1 + (s.x2 - s.x1) * p, s.y1 + (s.y2 - s.y1) * p, h);
+    };
     for (const s of shots) {
-      const [ax, ay] = toScreen(s.x1, s.y1, 1.8), [bx, by] = toScreen(s.x2, s.y2, 0.35);
-      g.moveTo(ax, ay); g.lineTo(bx, by);
+      const p = Math.min(1, Math.max(0, 1 - s.t / s.dur));
+      const [sx, sy] = at(s, p);
+      const [nx, ny] = at(s, Math.min(1, p + 0.03));
+      const ang = Math.atan2(ny - sy, nx - sx);
+      const pr = this.projSprites[s.kind];
+      if (s.kind === 'spike' || !pr) { this.drawSpike(g, sx, sy, ang); continue; }
+      g.save();
+      g.translate(sx, sy);
+      if (s.kind === 'stone') g.rotate(p * 6); // 石頭邊飛邊轉
+      else g.rotate(ang - pr.angle);
+      g.drawImage(pr.img, -pr.w / 2, -pr.h / 2, pr.w, pr.h);
+      g.restore();
     }
-    g.stroke();
+  }
+
+  /** 尖刺弩砲的刺：米白尖頭＋紅色環（設定圖只有特寫，直接畫） */
+  private drawSpike(g: CanvasRenderingContext2D, x: number, y: number, ang: number): void {
+    g.save();
+    g.translate(x, y);
+    g.rotate(ang);
+    g.fillStyle = '#f1dcb4';
+    g.beginPath(); g.moveTo(16, 0); g.lineTo(-14, -3.5); g.lineTo(-14, 3.5); g.closePath(); g.fill();
+    g.strokeStyle = 'rgba(90,60,30,0.5)'; g.lineWidth = 0.8; g.stroke();
+    g.fillStyle = '#c0392b';
+    g.fillRect(-9, -3, 3, 6); g.fillRect(-3, -2.4, 2.5, 4.8);
+    g.restore();
+  }
+
+  /** 彈道圖片：從設定圖裁下來去背；angle＝圖片裡箭頭原本朝的角度 */
+  private async loadProjectiles(): Promise<void> {
+    const base = import.meta.env.BASE_URL + 'sprites/projectiles/';
+    // 長度（世界單位）和圖片裡尖端的方向（從尾巴往尖端，螢幕角度）
+    const defs: [ProjKind, number, number][] = [['arrow', 0.75, Math.atan2(-50, 193)], ['javelin', 0.95, Math.atan2(-138, 195)], ['stone', 0.42, 0]];
+    for (const [kind, len, angle] of defs) {
+      const im = await loadImage(base + kind + '.png');
+      if (!im) continue;
+      const c = makeCutout(im, 26);
+      if (!c) continue;
+      const cv = document.createElement('canvas');
+      cv.width = c.w; cv.height = c.h;
+      const g = cv.getContext('2d')!;
+      g.putImageData(new ImageData(new Uint8ClampedArray(c.rgba), c.w, c.h), 0, 0);
+      if (kind === 'stone') {
+        // 石頭下半部連著投石杯：只留圓形的石頭
+        g.globalCompositeOperation = 'destination-in';
+        g.beginPath(); g.arc(c.w * 0.47, c.h * 0.47, Math.min(c.w, c.h) * 0.42, 0, Math.PI * 2); g.fill();
+      }
+      // 依長度縮放：箭、標槍以對角長度為準；石頭以寬度為準
+      const px = len * PX_PER_UNIT;
+      const k = kind === 'stone' ? px / c.w : px / Math.hypot(c.w, c.h);
+      this.projSprites[kind] = { img: cv, w: c.w * k, h: c.h * k, angle };
+    }
+  }
+
+  /** 地上的陷阱（小小的尖刺板） */
+  private drawTraps(g: CanvasRenderingContext2D): void {
+    for (const tr of this.world.traps) {
+      const [sx, sy] = toScreen(tr.x, tr.y);
+      g.fillStyle = '#9a6a3a';
+      g.beginPath(); g.ellipse(sx, sy, 9, 4.5, 0, 0, Math.PI * 2); g.fill();
+      g.fillStyle = '#d9d2c4';
+      for (const ox of [-5, 0, 5]) {
+        g.beginPath(); g.moveTo(sx + ox - 2, sy); g.lineTo(sx + ox, sy - 7); g.lineTo(sx + ox + 2, sy); g.closePath(); g.fill();
+      }
+    }
+  }
+
+  /** 一閃而過的範圍效果：吼叫（黃）、治療（綠）、號角（紅）、陷阱觸發（棕） */
+  private drawFx(g: CanvasRenderingContext2D): void {
+    const color = { bark: '255,200,60', heal: '90,210,110', horn: '226,75,91', trap: '160,100,50' };
+    for (const f of this.world.fx) {
+      const [sx, sy] = toScreen(f.x, f.y);
+      const a = Math.min(1, f.t / 0.3);
+      g.strokeStyle = `rgba(${color[f.kind]},${0.7 * a})`;
+      g.lineWidth = f.kind === 'horn' ? 1.5 : 2.5;
+      g.beginPath(); g.ellipse(sx, sy, f.r * PX_PER_UNIT, f.r * PX_PER_UNIT * 0.5, 0, 0, Math.PI * 2); g.stroke();
+      if (f.kind === 'heal') {
+        g.fillStyle = `rgba(${color.heal},${a})`;
+        g.fillRect(sx - 2, sy - 30, 4, 12); g.fillRect(sx - 6, sy - 26, 12, 4);
+      }
+    }
   }
 
   private drawFlow(g: CanvasRenderingContext2D): void {

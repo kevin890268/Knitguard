@@ -19,7 +19,7 @@
 - 背景會自動去掉（容差用 manifest 的 `bgTolerance`）
 - 高度依 manifest 的 `height` × 單位大小縮放，所有角度用同一個比例
 - **背景用和角色差很多的純色、不要畫地面陰影**：米白羊毛放在米色背景上，去背會吃掉頭頂；灰綠色背景就很乾淨
-- 羊人目前用 `Low-Poly Chibi Sheep Turnaround Sheet2`（45 度俯角、灰綠背景）裁出的 5 張（`art-src/sheep-topdown2/`）；米色背景版在 `art-src/sheep-topdown/`，平視版在 `art-src/sheep/`
+- 羊人目前用 `art-src/sheep/villager/concepts/Low-Poly Chibi Sheep Turnaround Sheet2.png`（45 度俯角、灰綠背景）裁出的 5 張（`art-src/sheep/villager/views-topdown2/`）；米色背景版在 `views-topdown/`，平視版在 `views-flat/`
 - 沒有這組圖時，才用下面的 `.glb` 拍成 8 方向；都沒有就用程式畫的 2D 圖
 
 ---
@@ -56,7 +56,7 @@
 
 | 情況 | 指令 |
 |---|---|
-| AI 模型**沒有貼圖**（只有形狀） | `node tools/views-to-glb.mjs art-src/sheep public/models/sheep.glb --mesh=<模型.glb>`：用 `art-src/sheep/` 裡的各角度圖投影上色 |
+| AI 模型**沒有貼圖**（只有形狀） | `node tools/views-to-glb.mjs art-src/sheep/villager/views-flat public/models/sheep.glb --mesh=<模型.glb>`：用該資料夾裡的各角度圖投影上色 |
 | （上一行的細節） | 預設輸出「投影貼圖」：每個面從看得到它、又最正對它的角度取原圖，五官會依模型的臉重新畫（位置不對用 `--nose-y=0.65` 指定，`--no-face` 關掉）；法線平滑、顏色往奶油色柔化（`--soften=0.12`）。要舊版的頂點色用 `--vertex-colors`，要稜角分明用 `--flat` |
 | 某個部位太大（例如尾巴） | 同上再加 `--shrink-back=y0,y1,z0,k[,度數]`：高度 y0–y1、凸出到 z0 後面的部分縮成 k 倍，再往下轉幾度（垂下來）；模型高度當 1 |
 | 變形後顏色不對 | 再加 `--back-color=#rrggbb`：變形的部位直接用這個顏色 |
@@ -64,7 +64,7 @@
 
 羊人目前的做法：Tripo 低面數模型（2996 面、無貼圖）+ 設定表上色 + 尾巴縮成 0.45 倍、往下垂 70 度、米白色：
 ```
-node tools/views-to-glb.mjs art-src/sheep public/models/sheep.glb "--mesh=low-poly ram 3d model.glb" --shrink-back=0.13,0.45,0.0,0.45,70 --back-color=#f1e4cf
+node tools/views-to-glb.mjs art-src/sheep/villager/views-flat public/models/sheep.glb "--mesh=art-src/sheep/villager/models/low-poly ram 3d model.glb" --shrink-back=0.13,0.45,0.0,0.45,70 --back-color=#f1e4cf
 ```
 
 ### 支援的內容

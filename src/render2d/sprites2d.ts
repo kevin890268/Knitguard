@@ -39,18 +39,21 @@ export function flipSprite(s: Sprite): Sprite {
  *   左半邊有圖（frontLeft45、backLeft45）就直接用，沒有就用右半邊的圖鏡像
  *   沒有 side 時，往右用 front45、往左用 frontLeft45
  */
-export const VIEW_FILES = ['front', 'front45', 'side', 'back45', 'back', 'frontLeft45', 'backLeft45'] as const;
+export const VIEW_FILES = ['front', 'front45', 'side', 'back45', 'back', 'frontLeft45', 'backLeft45', 'sideLeft'] as const;
 export type ViewName = (typeof VIEW_FILES)[number];
-/** 每個方向依序嘗試的圖：[檔名, 是否鏡像] */
+/**
+ * 每個方向依序嘗試的圖：[檔名, 是否鏡像]。檔名一律以「畫面上臉朝哪邊」為準：
+ * front45＝臉朝右下、frontLeft45＝臉朝左下、side＝臉朝右、sideLeft＝臉朝左、back45＝背影往右上、backLeft45＝背影往左上
+ */
 const DIR_VIEWS: [ViewName, boolean][][] = [
-  [['frontLeft45', false], ['front45', true]],
+  [['frontLeft45', false], ['front45', true], ['front', false]],
   [['front', false]],
-  [['front45', false], ['frontLeft45', true]],
-  [['side', false], ['front45', false], ['frontLeft45', true]],
-  [['back45', false], ['backLeft45', true]],
-  [['back', false]],
-  [['backLeft45', false], ['back45', true]],
-  [['side', true], ['frontLeft45', false], ['front45', true]],
+  [['front45', false], ['frontLeft45', true], ['front', false]],
+  [['side', false], ['sideLeft', true], ['front45', false], ['frontLeft45', true]],
+  [['back45', false], ['backLeft45', true], ['back', false]],
+  [['back', false], ['back45', false], ['backLeft45', false]],
+  [['backLeft45', false], ['back45', true], ['back', false]],
+  [['sideLeft', false], ['side', true], ['frontLeft45', false], ['front45', true]],
 ];
 
 /** cutouts：各視角去背後的圖（同一隻角色、同樣的比例）；heightPx：角色在畫面上要多高（未乘 SPRITE_SCALE） */
