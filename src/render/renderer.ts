@@ -32,6 +32,12 @@ export class GameRenderer {
   readonly art: ArtLibrary;
   showFlow = false;
   selected: Building | null = null;
+  /** 選取的部隊（3D 版先不畫選取圈） */
+  unitSel: Uint8Array | null = null;
+  /** 下指令時地上閃一下的標記（3D 版先不畫） */
+  pings: { x: number; y: number; t: number; color: string }[] = [];
+  /** 單位頭像（3D 版先沒有，介面改用圖示） */
+  portrait(_kind: number): HTMLCanvasElement | null { return null; }
 
   private world!: World;
   private mapGroup = new THREE.Group();
@@ -392,7 +398,8 @@ export class GameRenderer {
       const x = u.px[i] + (u.x[i] - u.px[i]) * alpha;
       const y = u.py[i] + (u.y[i] - u.py[i]) * alpha;
       const moving = u.vx[i] * u.vx[i] + u.vy[i] * u.vy[i] > 0.05;
-      const bob = moving ? Math.abs(Math.sin(t * 12 + i)) * 0.12 * kind.scale : 0;
+      // 走路一跳一跳；有輪子的器具用滑的
+      const bob = moving && !kind.wheeled ? Math.abs(Math.sin(t * 12 + i)) * 0.12 * kind.scale : 0;
       const s = kind.scale;
       m.makeRotationY(u.face[i]);
       m.scale(v.set(s, s * (1 - bob * 0.5), s));

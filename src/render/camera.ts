@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 
 /**
- * RTS 攝影機：WASD/方向鍵平移、滾輪縮放、右鍵(或中鍵)拖曳旋轉、Q/E 轉向。
+ * RTS 攝影機：方向鍵平移、滾輪縮放、右鍵(或中鍵)拖曳旋轉、Q/E 轉向。
  */
 export class RtsCamera {
   readonly camera = new THREE.PerspectiveCamera(40, 1, 0.5, 600);
@@ -11,6 +11,8 @@ export class RtsCamera {
   pitch = 0.95;
   bounds = { w: 96, h: 96 };
 
+  /** WASD 能不能移動鏡頭（main.ts 設成「沒選部隊時」） */
+  allowWasd: () => boolean = () => true;
   private keys = new Set<string>();
   private dragging = false;
   private lastX = 0;
@@ -55,10 +57,12 @@ export class RtsCamera {
     const fx = -Math.sin(this.yaw), fz = -Math.cos(this.yaw); // 地面上的「前方」
     const rx = Math.cos(this.yaw), rz = -Math.sin(this.yaw);
     let mx = 0, mz = 0;
-    if (k.has('w') || k.has('arrowup')) { mx += fx; mz += fz; }
-    if (k.has('s') || k.has('arrowdown')) { mx -= fx; mz -= fz; }
-    if (k.has('d') || k.has('arrowright')) { mx += rx; mz += rz; }
-    if (k.has('a') || k.has('arrowleft')) { mx -= rx; mz -= rz; }
+    // 方向鍵隨時可以；WASD 只在 allowWasd()（沒選部隊）時移動，選了部隊 A/S 是指令
+    const wasd = this.allowWasd();
+    if (k.has('arrowup') || (wasd && k.has('w'))) { mx += fx; mz += fz; }
+    if (k.has('arrowdown') || (wasd && k.has('s'))) { mx -= fx; mz -= fz; }
+    if (k.has('arrowright') || (wasd && k.has('d'))) { mx += rx; mz += rz; }
+    if (k.has('arrowleft') || (wasd && k.has('a'))) { mx -= rx; mz -= rz; }
     if (k.has('q')) this.yaw += dt * 1.8;
     if (k.has('e')) this.yaw -= dt * 1.8;
     const spd = this.dist * 0.9 * dt;
@@ -82,6 +86,14 @@ export class RtsCamera {
     const out = new THREE.Vector3();
     return this.ray.ray.intersectPlane(this.plane, out);
   }
+
+  /** 世界座標（x, y＝地面、h＝高度）→ 螢幕座標（選取部隊用） */
+  worldToClient(x: number, y: number, h = 0): [number, number] {
+    const r = this.dom.getBoundingClientRect();
+    const v = this.tmpV.set(x, h, y).project(this.camera);
+    return [r.left + (v.x + 1) / 2 * r.width, r.top + (1 - v.y) / 2 * r.height];
+  }
+  private tmpV = new THREE.Vector3();
 }
 
 export function isTyping(e: KeyboardEvent): boolean {

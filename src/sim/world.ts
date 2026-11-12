@@ -3,7 +3,13 @@ import { GameMap, Tile } from './map';
 import { Units } from './units';
 import { SpatialHash } from './spatialHash';
 import { FlowField } from './flowfield';
-import { Armor, BK, BUILDING_KINDS, ECON, MAX_LEVEL, PROJ, SLOW, Team, UK, UNIT_KINDS, type ProjKind } from './data';
+import { Armor, ASSIST, BK, BUILDING_KINDS, ECON, MAX_LEVEL, PLAYER_SIGHT, PROJ, SLOW, SQUAD, Team, UK, UNIT_KINDS, type ProjKind } from './data';
+import { formationSlots, Ord, type CommandType, type Formation, type QueuedOrder } from './orders';
+
+/** 玩家部隊的一條路徑：一張流場，終點是陣型的所有位置 */
+interface UnitPath { field: FlowField; goals: number[]; }
+const MAX_PATHS = 48;
+const MAX_GROUPS = 4096;
 
 export interface Building {
   id: number;
@@ -87,10 +93,21 @@ export class World {
   spawnPoints: number[] = [];
 
   private costs: Float32Array;
+  /** 玩家部隊走路的成本：建築和地形都不能穿過 */
+  private pathCosts: Float32Array;
+  private paths: (UnitPath | null)[] = [];
+  /** Shift 排進佇列的後續指令（只有排了指令的單位才有） */
+  private queues = new Map<number, QueuedOrder[]>();
   private flowDirty = true;
+  /** 小隊：每次下指令一個新編號（循環使用）；engX/engY＝這一隊正在打的地方，engTick＝最後一次有隊員在打的 tick */
+  private nextGrp = 0;
+  private readonly engX = new Float32Array(MAX_GROUPS);
+  private readonly engY = new Float32Array(MAX_GROUPS);
+  private readonly engTick = new Int32Array(MAX_GROUPS).fill(-100);
   private spawnQueue: number[] = []; // kind, x, y 三個一組
   private nextBid = 1;
   private tmp = new Int32Array(4096);
+  private steerOut: [number, number] = [0, 0];
   private rng: Rng;
 
   constructor(readonly seed: number, size = 96) {
@@ -100,6 +117,7 @@ export class World {
     this.flow = new FlowField(size, size);
     this.occ = new Int32Array(size * size).fill(-1);
     this.costs = new Float32Array(size * size);
+    this.pathCosts = new Float32Array(size * size);
     this.base = this.addBuilding(BK.Base, this.map.baseX, this.map.baseY);
     this.recomputeFlow();
     const { w, h } = this.map;
@@ -125,6 +143,7 @@ export class World {
       if (u.alive[i]) { u.px[i] = u.x[i]; u.py[i] = u.y[i]; }
     }
     if (this.flowDirty) this.recomputeFlow();
+    if (this.tick % 30 === 0) this.gcPaths();
     this.gold += ECON.passiveIncome * dt;
     const lastWave = this.victoryWave > 0 && this.wave >= this.victoryWave;
     if (this.autoWaves && !lastWave) {
@@ -257,8 +276,10 @@ export class World {
   }
 
   upgradeCost(b: Building): number | null {
-    if (b.level >= MAX_LEVEL) return null;
-    return BUILDING_KINDS[b.kind].upgradeCost[b.level - 1] ?? null;
+    const k = BUILDING_KINDS[b.kind];
+    // 一般建築最高 MAX_LEVEL 級；有更多升級費用的（市鎮中心）照費用的數量
+    if (b.level >= Math.max(MAX_LEVEL, k.upgradeCost.length + 1)) return null;
+    return k.upgradeCost[b.level - 1] ?? null;
   }
 
   upgrade(b: Building): boolean {
@@ -284,7 +305,8 @@ export class World {
     b.rallyY = y;
     const u = this.units;
     for (let i = 0; i < u.hi; i++) {
-      if (u.alive[i] && u.owner[i] === b.id) {
+      // 正在執行玩家指令的不動
+      if (u.alive[i] && u.owner[i] === b.id && u.order[i] === Ord.Idle) {
         u.homeX[i] = x + this.rng.range(-0.8, 0.8);
         u.homeY[i] = y + this.rng.range(-0.8, 0.8);
       }
@@ -333,17 +355,256 @@ export class World {
     for (let y = this.base.ty; y < this.base.ty + this.base.size; y++)
       for (let x = this.base.tx; x < this.base.tx + this.base.size; x++) goals.push(y * this.map.w + x);
     this.flow.compute(this.costs, goals);
+    // 玩家部隊的路徑：建築擋路 → 蓋了或拆了建築就重算
+    for (let i = 0; i < n; i++) this.pathCosts[i] = this.map.tiles[i] === Tile.Grass && this.occ[i] < 0 ? 1 : Infinity;
+    for (const p of this.paths) if (p) p.field.compute(this.pathCosts, p.goals);
     this.flowDirty = false;
+  }
+
+  // ---------------------------------------------------------------- 部隊指令（參考世紀帝國 4，見 orders.ts）
+  /**
+   * 對一群我方單位下指令。
+   * (x, y)：目的地（移動／攻擊移動／巡邏）；target：攻擊的敵人（attack）
+   * queue：Shift 排在目前指令之後；form：陣型
+   */
+  command(ids: number[], type: CommandType, x: number, y: number, opts: { queue?: boolean; form?: Formation; target?: number } = {}): void {
+    const u = this.units;
+    ids = ids.filter((i) => u.alive[i] && u.team[i] === Team.Player);
+    if (!ids.length) return;
+    const queue = !!opts.queue;
+    // 一起下令的就是同一個小隊（Shift 排指令時沿用原本的小隊）
+    if (!queue || ids.some((i) => u.grp[i] < 0)) {
+      const g = this.nextGrp++ % MAX_GROUPS;
+      this.engTick[g] = -100;
+      for (const i of ids) u.grp[i] = g;
+    }
+
+    if (type === 'stop' || type === 'hold') {
+      for (const i of ids) {
+        this.queues.delete(i);
+        this.goIdle(i, u.x[i], u.y[i]);
+        u.hold[i] = type === 'hold' ? 1 : 0;
+      }
+      return;
+    }
+    if (type === 'attack') {
+      const t = opts.target ?? -1;
+      if (t < 0 || !u.alive[t] || u.team[t] === Team.Player) return;
+      for (const i of ids) this.issue(i, { ord: Ord.Attack, x: u.x[t], y: u.y[t], t, path: -1, px: 0, py: 0, path2: -1 }, queue);
+      return;
+    }
+
+    // 移動類：先算陣型。起點用「排完佇列後的位置」（Shift 時）或目前位置
+    const n = ids.length, sx = new Float32Array(u.cap), sy = new Float32Array(u.cap);
+    let cx = 0, cy = 0, minSpeed = Infinity;
+    for (const i of ids) {
+      const [px, py] = queue ? this.lastDest(i) : [u.x[i], u.y[i]];
+      sx[i] = px; sy[i] = py; cx += px; cy += py;
+      minSpeed = Math.min(minSpeed, UNIT_KINDS[u.kind[i]].speed);
+    }
+    cx /= n; cy /= n;
+    let fx = x - cx, fy = y - cy;
+    const fd = Math.hypot(fx, fy);
+    if (fd < 0.01) { fx = 1; fy = 0; } else { fx /= fd; fy /= fd; }
+    const slots = formationSlots(ids, sx, sy, u.kind, u.rad, x, y, fx, fy, opts.form ?? 'line');
+
+    // 從起點能走到哪裡（點在水裡、對岸、石頭上 → 改成最近走得到的地方）；巡邏的回程也用它
+    const W = this.map.w, startGoals = new Set<number>();
+    for (const i of ids) startGoals.add(Math.floor(sy[i]) * W + Math.floor(sx[i]));
+    const reach = new FlowField(W, this.map.h);
+    reach.compute(this.pathCosts, [...startGoals]);
+    // 路徑走到陣型中心；每個位置都要從中心看得到（中間沒有石頭、樹），走到看得到自己的位置就直走過去
+    const [ccx, ccy] = this.snapReachable(x, y, reach);
+    for (let k = 0; k < n; k++) {
+      let [px, py] = this.snapReachable(slots[k * 2], slots[k * 2 + 1], reach);
+      if (!this.clearLine(ccx, ccy, px, py, 0.3)) [px, py] = this.nearestVisible(px, py, ccx, ccy, reach);
+      slots[k * 2] = px; slots[k * 2 + 1] = py;
+    }
+    const path = this.newPath([Math.floor(ccy) * W + Math.floor(ccx)]);
+    const path2 = type === 'patrol' ? this.newPath([...startGoals], reach) : -1;
+    const ord = type === 'move' ? Ord.Move : type === 'patrol' ? Ord.Patrol : Ord.AttackMove;
+    ids.forEach((i, k) => {
+      this.issue(i, { ord, x: slots[k * 2], y: slots[k * 2 + 1], t: -1, path, px: sx[i], py: sy[i], path2 }, queue);
+      u.spdCap[i] = n > 1 ? minSpeed : 0; // 陣型一起走：配合最慢的
+    });
+  }
+
+  /** 單位的佇列指令（給畫面顯示路線用） */
+  queuedOrders(i: number): readonly QueuedOrder[] {
+    return this.queues.get(i) ?? [];
+  }
+
+  /** 排完所有指令後會在哪裡 */
+  private lastDest(i: number): [number, number] {
+    const u = this.units, q = this.queues.get(i);
+    if (q?.length) { const o = q[q.length - 1]; return [o.x, o.y]; }
+    if (u.order[i] !== Ord.Idle) return [u.ordX[i], u.ordY[i]];
+    return [u.x[i], u.y[i]];
+  }
+
+  private issue(i: number, o: QueuedOrder, queue: boolean): void {
+    if (queue && this.units.order[i] !== Ord.Idle) {
+      let q = this.queues.get(i);
+      if (!q) this.queues.set(i, q = []);
+      q.push(o);
+      return;
+    }
+    this.queues.delete(i);
+    this.applyOrder(i, o);
+  }
+
+  private applyOrder(i: number, o: QueuedOrder): void {
+    const u = this.units;
+    u.order[i] = o.ord;
+    u.ordX[i] = o.x; u.ordY[i] = o.y;
+    u.ordT[i] = o.t;
+    u.target[i] = o.t;
+    u.path[i] = o.path;
+    u.path2[i] = o.path2;
+    u.patX[i] = o.px; u.patY[i] = o.py;
+    u.hold[i] = 0;
+    u.waitT[i] = 0;
+    u.bestD[i] = Infinity;
+  }
+
+  /** 目前的指令做完了 → 下一個佇列指令，沒有就在 (x, y) 待命 */
+  private finishOrder(i: number, x: number, y: number): void {
+    const q = this.queues.get(i);
+    const next = q?.shift();
+    if (q && !q.length) this.queues.delete(i);
+    if (next) this.applyOrder(i, next);
+    else this.goIdle(i, x, y);
+  }
+
+  private goIdle(i: number, x: number, y: number): void {
+    const u = this.units;
+    u.order[i] = Ord.Idle;
+    u.homeX[i] = x; u.homeY[i] = y;
+    u.target[i] = u.ordT[i] = -1;
+    u.path[i] = u.path2[i] = -1;
+    u.spdCap[i] = 0;
+  }
+
+  /** (x, y) 走不到（石頭、水、建築、對岸）→ 最近一個走得到的格子 */
+  private snapReachable(x: number, y: number, reach: FlowField): [number, number] {
+    const W = this.map.w, tx = Math.floor(x), ty = Math.floor(y);
+    const ok = (cx: number, cy: number) => this.map.inBounds(cx, cy) && !this.isSolid(cx, cy) && reach.dist[cy * W + cx] < Infinity;
+    if (ok(tx, ty)) return [x, y];
+    let best: [number, number] = [x, y], bd = Infinity, found = -1;
+    for (let r = 1; r <= 60; r++) {
+      if (found >= 0 && r > found + 2) break; // 找到後再多看兩圈，取直線最近的
+      for (let dy = -r; dy <= r; dy++) for (let dx = -r; dx <= r; dx++) {
+        if (Math.max(Math.abs(dx), Math.abs(dy)) !== r || !ok(tx + dx, ty + dy)) continue;
+        const px = tx + dx + 0.5, py = ty + dy + 0.5, d = (px - x) ** 2 + (py - y) ** 2;
+        if (d < bd) { bd = d; best = [px, py]; if (found < 0) found = r; }
+      }
+    }
+    return best;
+  }
+
+  /** 兩點之間有沒有被擋住（以寬 2r 的帶子檢查石頭、樹、水、建築） */
+  private clearLine(x0: number, y0: number, x1: number, y1: number, r: number): boolean {
+    const dx = x1 - x0, dy = y1 - y0, len = Math.hypot(dx, dy);
+    if (len < 1e-3) return true;
+    const px = (-dy / len) * r, py = (dx / len) * r, steps = Math.ceil(len / 0.25);
+    for (let s = 1; s <= steps; s++) {
+      const x = x0 + (dx * s) / steps, y = y0 + (dy * s) / steps;
+      if (this.isSolid(Math.floor(x), Math.floor(y)) || this.isSolid(Math.floor(x + px), Math.floor(y + py)) || this.isSolid(Math.floor(x - px), Math.floor(y - py))) return false;
+    }
+    return true;
+  }
+
+  /** 離 (x, y) 最近、走得到、而且從 (cx, cy) 看得到的格子；都沒有就回傳 (cx, cy) */
+  private nearestVisible(x: number, y: number, cx: number, cy: number, reach: FlowField): [number, number] {
+    const W = this.map.w, tx = Math.floor(x), ty = Math.floor(y);
+    let best: [number, number] = [cx, cy], bd = Infinity;
+    for (let r = 1; r <= 6; r++) {
+      for (let dy = -r; dy <= r; dy++) for (let dx = -r; dx <= r; dx++) {
+        if (Math.max(Math.abs(dx), Math.abs(dy)) !== r) continue;
+        const gx = tx + dx, gy = ty + dy;
+        if (!this.map.inBounds(gx, gy) || this.isSolid(gx, gy) || !(reach.dist[gy * W + gx] < Infinity)) continue;
+        const px = gx + 0.5, py = gy + 0.5, d = (px - x) ** 2 + (py - y) ** 2;
+        if (d < bd && this.clearLine(cx, cy, px, py, 0.3)) { bd = d; best = [px, py]; }
+      }
+      if (bd < Infinity) break;
+    }
+    return best;
+  }
+
+  private newPath(goals: number[], field?: FlowField): number {
+    let id = this.paths.indexOf(null);
+    if (id < 0) {
+      if (this.paths.length >= MAX_PATHS) return -1; // 太多條了：直線走
+      id = this.paths.length;
+      this.paths.push(null);
+    }
+    if (!field) {
+      field = new FlowField(this.map.w, this.map.h);
+      field.compute(this.pathCosts, goals);
+    }
+    this.paths[id] = { field, goals };
+    return id;
+  }
+
+  /** 沒有單位在用的路徑丟掉 */
+  private gcPaths(): void {
+    if (!this.paths.length) return;
+    const used = new Uint8Array(this.paths.length), u = this.units;
+    for (let i = 0; i < u.hi; i++) {
+      if (!u.alive[i]) continue;
+      if (u.path[i] >= 0) used[u.path[i]] = 1;
+      if (u.path2[i] >= 0) used[u.path2[i]] = 1;
+    }
+    for (const q of this.queues.values()) for (const o of q) {
+      if (o.path >= 0) used[o.path] = 1;
+      if (o.path2 >= 0) used[o.path2] = 1;
+    }
+    for (let p = 0; p < this.paths.length; p++) if (!used[p]) this.paths[p] = null;
+  }
+
+  /**
+   * 走向指令目的地：遠的時候跟著路徑（流場）走，快到了直接走過去。
+   * 回傳是否到了（被擠住、在附近待太久也算到了）。
+   */
+  private steerToOrder(i: number, dt: number, out: [number, number]): boolean {
+    const u = this.units, x = u.x[i], y = u.y[i];
+    const ex = u.ordX[i] - x, ey = u.ordY[i] - y, d = Math.hypot(ex, ey);
+    out[0] = out[1] = 0;
+    if (d < 0.2) return true;
+    const p = u.path[i] >= 0 ? this.paths[u.path[i]] : null;
+    const ti = Math.floor(y) * this.map.w + Math.floor(x);
+    // 路徑通往陣型中心 → 看不到自己的位置時跟著路徑走，看得到了（中間沒東西擋）再直接走過去
+    const pd = p ? p.field.dist[ti] : Infinity;
+    const follow = !!p && pd < Infinity && (p.field.dirX[ti] !== 0 || p.field.dirY[ti] !== 0)
+      && !(d < 14 && this.clearLine(x, y, u.ordX[i], u.ordY[i], u.rad[i] * 0.9));
+    // 沒有更接近（沿路徑的距離；繞路不算後退）：快到了（被擠住）1 秒、其他（窄路排隊、卡住）8 秒 → 算到了
+    // 跟著路徑時用「1000＋路徑距離」，切換成直走時一定算進步
+    const m = follow ? 1000 + pd : d;
+    if (m < u.bestD[i] - 0.3) { u.bestD[i] = m; u.waitT[i] = 0; }
+    else if ((u.waitT[i] += dt) > (d < 1.5 ? 1 : 8)) return true;
+    if (follow) {
+      // 朝「下一格的中心」走，而不是直接用方向：站在格子邊緣時照方向走會卡在石頭角上
+      const nx = Math.floor(x) + 0.5 + Math.sign(p!.field.dirX[ti]), ny = Math.floor(y) + 0.5 + Math.sign(p!.field.dirY[ti]);
+      const ax = nx - x, ay = ny - y, al = Math.hypot(ax, ay) || 1;
+      out[0] = ax / al; out[1] = ay / al;
+      return false;
+    }
+    const s = Math.min(1, d * 2);
+    out[0] = (ex / d) * s; out[1] = (ey / d) * s;
+    return false;
   }
 
   // ---------------------------------------------------------------- 單位 AI
   private findTarget(i: number): number {
     const u = this.units;
     const k = UNIT_KINDS[u.kind[i]];
-    // 我方士兵以「集結點」為中心索敵 → 守住位置，不會被引走
-    const cx = u.team[i] === Team.Player ? u.homeX[i] : u.x[i];
-    const cy = u.team[i] === Team.Player ? u.homeY[i] : u.y[i];
-    const r = k.aggro;
+    // 待命的我方士兵以「自己的崗位」為中心索敵 → 守住位置，不會被引走；
+    // 攻擊移動、巡邏時以自己為中心；堅守時只找射程內的
+    const guard = u.team[i] === Team.Player && u.order[i] === Ord.Idle && !u.hold[i];
+    const cx = guard ? u.homeX[i] : u.x[i];
+    const cy = guard ? u.homeY[i] : u.y[i];
+    const player = u.team[i] === Team.Player;
+    const r = u.hold[i] ? (k.range ?? k.reach) + u.rad[i] + 0.6 : player ? Math.max(k.aggro, PLAYER_SIGHT) : k.aggro;
     const n = this.hash.queryInto(cx, cy, r, this.tmp);
     let best = -1, bd = r * r;
     const team = u.team[i];
@@ -354,7 +615,36 @@ export class World {
       const d2 = dx * dx + dy * dy;
       if (d2 < bd) { bd = d2; best = j; }
     }
-    return best;
+    if (best >= 0 || !player || u.hold[i]) return best;
+    // 同一小隊有人在打 → 全隊圍過去：在戰鬥點附近找離自己最近的敵人
+    const g = this.squadFight(i);
+    if (g >= 0) {
+      const m = this.hash.queryInto(this.engX[g], this.engY[g], SQUAD.fight, this.tmp);
+      let sb = -1, sd = Infinity;
+      for (let q = 0; q < m; q++) {
+        const j = this.tmp[q];
+        if (!u.alive[j] || u.team[j] === team) continue;
+        const d2 = (u.x[j] - u.x[i]) ** 2 + (u.y[j] - u.y[i]) ** 2;
+        if (d2 < sd) { sd = d2; sb = j; }
+      }
+      if (sb >= 0) return sb;
+    }
+    // 自己看不到敵人，但旁邊的隊友在打 → 一起去打它的目標（圍過去）
+    const m = this.hash.queryInto(u.x[i], u.y[i], ASSIST, this.tmp);
+    for (let q = 0; q < m; q++) {
+      const j = this.tmp[q], t = u.target[j];
+      if (j === i || !u.alive[j] || u.team[j] !== team || t < 0 || !u.alive[t] || u.team[t] === team) continue;
+      if ((u.x[t] - cx) ** 2 + (u.y[t] - cy) ** 2 > (r + ASSIST) ** 2) continue; // 太遠就不被拉走
+      return t;
+    }
+    return -1;
+  }
+
+  /** 這隻所屬的小隊剛剛有人在打、而且戰鬥點不太遠 → 回傳小隊編號；不然 -1 */
+  private squadFight(i: number): number {
+    const u = this.units, g = u.grp[i];
+    if (g < 0 || u.order[i] === Ord.Move || u.hold[i] || this.engTick[g] < this.tick - 3) return -1;
+    return (this.engX[g] - u.x[i]) ** 2 + (this.engY[g] - u.y[i]) ** 2 <= SQUAD.pull * SQUAD.pull ? g : -1;
   }
 
   // ---------------------------------------------------------------- 傷害
@@ -432,11 +722,15 @@ export class World {
       const x = u.x[i], y = u.y[i], team = u.team[i];
       if (s.type === 'horn') {
         const n = this.hash.queryInto(x, y, s.radius, this.tmp);
+        let fighting = false;
         for (let q = 0; q < n; q++) {
           const j = this.tmp[q];
-          if (u.alive[j] && u.team[j] === team && j !== i) u.buff[j] = Math.max(u.buff[j], s.atk);
+          if (!u.alive[j]) continue;
+          if (u.team[j] === team) { if (j !== i) u.buff[j] = Math.max(u.buff[j], s.atk); }
+          else fighting = true;
         }
-        if (((this.tick + i) % 45) === 0) this.fx.push({ x, y, r: s.radius, t: 0.4, kind: 'horn' });
+        // 號角聲的圈：只有附近有敵人（正在打仗）才閃，平常不吵
+        if (fighting && ((this.tick + i) % 45) === 0) this.fx.push({ x, y, r: s.radius, t: 0.4, kind: 'horn' });
       } else if (s.type === 'curl') {
         // 附近有敵人就縮球；敵人離開 1.5 秒後才張開
         let near = false;
@@ -546,17 +840,32 @@ export class World {
       u.cd[i] -= slowed ? dt * (1 - SLOW.attack) : dt;
       if (u.hitT[i] > 0) u.hitT[i] -= dt;
 
+      const x = u.x[i], y = u.y[i];
+      // 指定攻擊的目標死了 → 下一個指令
+      if (u.order[i] === Ord.Attack) {
+        const ot = u.ordT[i];
+        if (ot < 0 || !u.alive[ot] || u.team[ot] === u.team[i]) this.finishOrder(i, x, y);
+      }
+      const ord = u.order[i];
+
       let t = u.target[i];
-      if (k.support) t = -1;
+      if (k.support || ord === Ord.Move) t = -1; // 移動指令：一路不理敵人
+      else if (ord === Ord.Attack) t = u.ordT[i];
       else {
         if (t >= 0 && (!u.alive[t] || u.team[t] === u.team[i])) t = -1;
         // 錯開每個單位的索敵時機，分散 CPU 負擔
         if (t < 0 ? ((this.tick + i) & 7) === 0 : ((this.tick + i) & 15) === 0) t = this.findTarget(i);
       }
       u.target[i] = t;
+      // 小隊有人在打：記下戰鬥點，給其他隊員參考
+      const grp = u.grp[i];
+      if (t >= 0 && grp >= 0 && u.team[i] === Team.Player) {
+        this.engX[grp] = u.x[t]; this.engY[grp] = u.y[t]; this.engTick[grp] = this.tick;
+      }
 
-      const x = u.x[i], y = u.y[i];
       let dx = 0, dy = 0, attacking = false;
+      const holding = u.hold[i] === 1 && ord === Ord.Idle;
+      if (t >= 0) u.bestD[i] = Infinity; // 打完再重新判斷有沒有在前進
 
       if (t >= 0) {
         const ex = u.x[t] - x, ey = u.y[t] - y;
@@ -582,7 +891,8 @@ export class World {
             } else if (ranged && k.proj) this.launch(i, t, k.proj);
             else this.hit(i, t, ranged);
           }
-        } else { dx = ex / d; dy = ey / d; }
+        } else if (holding) u.target[i] = -1; // 堅守：跑出射程就不追
+        else { dx = ex / d; dy = ey / d; }
       } else if (u.team[i] === Team.Enemy) {
         const tx = Math.min(w - 1, Math.max(0, Math.floor(x)));
         const ty = Math.min(h - 1, Math.max(0, Math.floor(y)));
@@ -622,7 +932,24 @@ export class World {
             }
           } else { dx = fx; dy = fy; }
         } else { dx = fx; dy = fy; }
-      } else {
+      } else if (k.support && this.squadFight(i) >= 0) {
+        // 輔助兵（號角手、救援犬）：小隊在打就跟過去，站在戰鬥點後面一點
+        u.bestD[i] = Infinity; // 打完再重新判斷有沒有在前進
+        const g = u.grp[i], ex = this.engX[g] - x, ey = this.engY[g] - y, d = Math.hypot(ex, ey);
+        if (d > SQUAD.supportGap) { const s = Math.min(1, d - SQUAD.supportGap); dx = (ex / d) * s; dy = (ey / d) * s; }
+      } else if (ord !== Ord.Idle) {
+        // 執行指令：走向目的地
+        const out = this.steerOut;
+        if (this.steerToOrder(i, dt, out)) {
+          if (ord === Ord.Patrol) {
+            // 巡邏：到了一端就換去另一端
+            const ox = u.ordX[i], oy = u.ordY[i], op = u.path[i];
+            u.ordX[i] = u.patX[i]; u.ordY[i] = u.patY[i]; u.path[i] = u.path2[i];
+            u.patX[i] = ox; u.patY[i] = oy; u.path2[i] = op;
+            u.waitT[i] = 0; u.bestD[i] = Infinity;
+          } else this.finishOrder(i, u.ordX[i], u.ordY[i]);
+        } else { dx = out[0]; dy = out[1]; }
+      } else if (!holding) {
         const hx = u.homeX[i] - x, hy = u.homeY[i] - y, d = Math.hypot(hx, hy);
         if (d > 0.3) {
           const s = Math.min(1, d);
@@ -631,6 +958,8 @@ export class World {
       }
 
       let speed = k.speed;
+      // 陣型一起走時配合最慢的單位；快到了才各自加速就位
+      if (u.spdCap[i] > 0 && ord !== Ord.Idle && t < 0 && Math.hypot(u.ordX[i] - x, u.ordY[i] - y) > 2.5) speed = Math.min(speed, u.spdCap[i]);
       if (slowed) speed *= 1 - SLOW.move;
       if (u.curled[i] && k.skill?.type === 'curl') speed *= 1 - k.skill.slow;
       u.vx[i] += (dx * speed - u.vx[i]) * blend;
@@ -762,6 +1091,7 @@ export class World {
         const b = this.byId.get(u.owner[i]);
         if (b) b.units--;
       }
+      this.queues.delete(i);
       u.kill(i);
     }
     for (const b of this.buildings) {

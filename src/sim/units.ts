@@ -39,6 +39,33 @@ export class Units {
   /** 技能冷卻（陷阱、治療） */
   readonly skillT: Float32Array;
 
+  // ---- 玩家下的指令（見 orders.ts 的 Ord）
+  /** 目前的指令 */
+  readonly order: Uint8Array;
+  /** 堅守位置：不移動，只打射程內的敵人 */
+  readonly hold: Uint8Array;
+  /** 指令目的地（陣型裡自己的位置） */
+  readonly ordX: Float32Array;
+  readonly ordY: Float32Array;
+  /** 巡邏的另一端 */
+  readonly patX: Float32Array;
+  readonly patY: Float32Array;
+  /** 指定攻擊的目標 */
+  readonly ordT: Int32Array;
+  /** 走去目的地用的路徑（World.paths 的編號，-1 = 直線走）；path2 是巡邏回程 */
+  readonly path: Int16Array;
+  readonly path2: Int16Array;
+  /** 陣型一起走時的速度上限（0 = 不限） */
+  readonly spdCap: Float32Array;
+  /** 沒有更接近目的地的時間（被擠住或走不到，太久就算到了） */
+  readonly waitT: Float32Array;
+  /** 目前為止離目的地最近的距離（判斷有沒有在前進） */
+  readonly bestD: Float32Array;
+  /** 小隊：同一次指令一起下令的單位是同一隊，一隻開打全隊一起圍過去（-1 = 沒有） */
+  readonly grp: Int32Array;
+  /** 第幾代：索引被重複使用時 +1（選取、編隊用它分辨是不是同一隻） */
+  readonly gen: Uint32Array;
+
   private free: number[] = [];
 
   constructor(readonly cap: number) {
@@ -48,6 +75,14 @@ export class Units {
     this.dmg = f(); this.rad = f(); this.cd = f(); this.face = f();
     this.hitT = f(); this.homeX = f(); this.homeY = f();
     this.buff = f(); this.slowT = f(); this.curlT = f(); this.skillT = f();
+    this.ordX = f(); this.ordY = f(); this.patX = f(); this.patY = f(); this.spdCap = f(); this.waitT = f(); this.bestD = f();
+    this.order = new Uint8Array(cap);
+    this.hold = new Uint8Array(cap);
+    this.ordT = new Int32Array(cap);
+    this.path = new Int16Array(cap);
+    this.path2 = new Int16Array(cap);
+    this.gen = new Uint32Array(cap);
+    this.grp = new Int32Array(cap);
     this.curled = new Uint8Array(cap);
     this.kind = new Uint8Array(cap);
     this.team = new Uint8Array(cap);
@@ -73,6 +108,10 @@ export class Units {
     this.hitT[i] = 0;
     this.buff[i] = this.slowT[i] = this.curlT[i] = this.skillT[i] = 0;
     this.curled[i] = 0;
+    this.order[i] = this.hold[i] = 0;
+    this.ordT[i] = this.path[i] = this.path2[i] = this.grp[i] = -1;
+    this.spdCap[i] = this.waitT[i] = 0;
+    this.gen[i]++;
     this.kind[i] = kind;
     this.team[i] = k.team;
     this.alive[i] = 1;

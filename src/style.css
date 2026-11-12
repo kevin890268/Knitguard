@@ -10,7 +10,7 @@ html, body { margin: 0; height: 100%; overflow: hidden; background: #f3e9dc; col
 #app { position: fixed; inset: 0; }
 #app canvas { display: block; }
 
-.panel, #hud, #toolbar .tool, #selPanel, #help {
+.panel, #hud, #help {
   background: var(--cream);
   border: 2px dashed var(--stitch); /* 縫線邊框 */
   border-radius: 14px;
@@ -25,26 +25,89 @@ html, body { margin: 0; height: 100%; overflow: hidden; background: #f3e9dc; col
 #stats { position: fixed; top: 10px; left: 10px; font: 12px/1.5 Consolas, monospace; white-space: pre;
   background: #0007; color: #fff; padding: 6px 9px; border-radius: 8px; pointer-events: none; }
 
-#toolbar { position: fixed; bottom: 12px; left: 50%; transform: translateX(-50%); display: flex; gap: 8px; }
-#toolbar .tool { position: relative; width: 74px; height: 78px; padding: 4px; cursor: pointer; color: var(--ink);
-  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 1px; font: inherit; }
-#toolbar .tool:hover { transform: translateY(-2px); }
-#toolbar .tool.on { border-color: var(--accent); border-style: solid; background: #fff; }
-#toolbar .tool.poor { opacity: .5; }
-#toolbar .tool.debug { background: #eef3fb; }
-#toolbar .ico { font-size: 24px; }
-#toolbar .lbl { font-size: 12px; }
-#toolbar .cost { font-size: 11px; color: #a06a10; }
-#toolbar .key { position: absolute; top: 2px; right: 6px; font-size: 10px; opacity: .5; }
+/* ---------------------------------------------------------------- 最下方資訊列（參考世紀帝國 4）
+   資訊｜編隊＋選取格子｜指令卡｜小地圖 */
+#bottomBar { position: fixed; left: 0; right: 0; bottom: 0; height: 168px; padding: 8px; gap: 8px; display: grid;
+  grid-template-columns: minmax(230px, 320px) minmax(140px, 1fr) minmax(220px, 300px) auto;
+  background: linear-gradient(#e9d9c4ee, #dcc7acf2); border-top: 3px dashed var(--stitch); box-shadow: 0 -4px 14px #0002; }
+#bottomBar .sec { background: var(--cream); border: 2px dashed var(--stitch); border-radius: 12px; min-width: 0; overflow: hidden; }
 
-#selPanel { position: fixed; right: 12px; bottom: 12px; width: 220px; padding: 10px 12px; display: none; font-size: 14px; line-height: 1.5; }
-#selPanel .row { display: flex; gap: 6px; margin-top: 8px; flex-wrap: wrap; }
-#selPanel button { font: inherit; font-size: 13px; padding: 4px 8px; border-radius: 8px; border: 2px solid var(--stitch);
-  background: #fff; color: var(--ink); cursor: pointer; }
-#selPanel button:disabled { opacity: .45; cursor: not-allowed; }
-#selPanel button.on { border-color: var(--accent); }
+/* 左：頭像＋數值 */
+#infoPanel { display: flex; gap: 10px; padding: 8px; font-size: 13px; line-height: 1.45; }
+#infoPanel .empty { margin: auto; text-align: center; opacity: .55; }
+#infoPanel .pf { flex: 0 0 82px; height: 100%; display: flex; align-items: center; justify-content: center;
+  background: radial-gradient(#fff, #efe2cf); border-radius: 10px; border: 2px solid #e2cdb0; }
+#infoPanel .face { max-width: 78px; max-height: 128px; object-fit: contain; }
+#infoPanel .emoji { font-size: 44px; }
+#infoPanel .body { flex: 1; min-width: 0; overflow: hidden; }
+#infoPanel .name { font-weight: bold; font-size: 15px; color: #6b4a2a; }
+#infoPanel .name small { font-weight: normal; color: var(--ink); opacity: .7; }
+.hpbar { position: relative; height: 14px; margin: 2px 0 4px; background: #0002; border-radius: 7px; overflow: hidden; }
+.hpbar i { position: absolute; inset: 0 auto 0 0; border-radius: 7px; }
+.hpbar span { position: relative; display: block; text-align: center; font-size: 11px; line-height: 14px; color: #333; }
+#infoPanel .stats { display: flex; flex-wrap: wrap; gap: 0 10px; }
+#infoPanel .stats small { opacity: .6; }
+#infoPanel .up { color: #c0392b; font-size: 11px; }
+#infoPanel .bonus, #infoPanel .skill { font-size: 12px; opacity: .85; }
+#infoPanel .status { font-size: 12px; color: #2f6f2f; margin-top: 2px; }
 
-#help { position: fixed; left: 10px; bottom: 12px; font-size: 12px; padding: 6px 10px; max-width: 260px; line-height: 1.6; opacity: .9; }
+/* 中：編隊＋選取格子 */
+#midPanel { display: flex; flex-direction: column; padding: 6px 8px; gap: 6px; }
+#groups { display: flex; gap: 4px; }
+#groups button { font: inherit; font-size: 12px; font-weight: bold; min-width: 30px; padding: 1px 5px; border-radius: 7px;
+  border: 1.5px solid #d9c3a6; background: #f6ecdf; color: #b8a58f; cursor: pointer; }
+#groups button.has { background: #fff; color: var(--ink); border-color: var(--stitch); }
+#groups small { font-weight: normal; margin-left: 2px; opacity: .7; }
+#selGrid { flex: 1; display: flex; flex-wrap: wrap; align-content: flex-start; gap: 5px; overflow: auto; }
+#selGrid .tile { position: relative; width: 50px; height: 56px; border-radius: 8px; border: 2px solid #e2cdb0; background: #fff;
+  cursor: pointer; display: flex; align-items: center; justify-content: center; overflow: hidden; }
+#selGrid .tile:hover { border-color: var(--accent); }
+#selGrid .mini { max-width: 44px; max-height: 50px; object-fit: contain; }
+#selGrid .mini.emoji { font-size: 26px; }
+#selGrid .tile b { position: absolute; right: 3px; bottom: 6px; font-size: 12px; color: #fff; text-shadow: 0 0 3px #000, 0 0 2px #000; }
+#selGrid .tile i { position: absolute; left: 0; bottom: 0; height: 4px; }
+#selGrid .hint { margin: auto; font-size: 13px; opacity: .55; }
+
+/* 右：指令卡（4 欄） */
+#cmdCard { display: grid; grid-template-columns: repeat(4, 1fr); grid-auto-rows: 48px; gap: 5px; padding: 7px; align-content: start; }
+#cmdCard .cmd { position: relative; font: inherit; color: var(--ink); border-radius: 9px; border: 2px solid #e2cdb0; background: #fff;
+  cursor: pointer; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 0; line-height: 1.1; }
+#cmdCard .cmd:hover { border-color: var(--accent); }
+#cmdCard .cmd.on { border-color: var(--accent); background: #fdecef; }
+#cmdCard .cmd:disabled, #cmdCard .cmd.poor { opacity: .45; }
+#cmdCard .cmd.debug { background: #eef3fb; }
+#cmdCard .ico { font-size: 19px; }
+#cmdCard .lbl { font-size: 10px; white-space: nowrap; }
+#cmdCard .cost { position: absolute; left: 3px; top: 1px; font-size: 9px; color: #a06a10; }
+#cmdCard .key { position: absolute; right: 4px; top: 1px; font-size: 9px; opacity: .55; }
+
+/* 最右：小地圖 */
+#mapPanel { padding: 3px; display: flex; align-items: center; justify-content: center; background: #cdb898 !important; }
+#minimap { display: block; width: 280px; height: 140px; cursor: pointer; }
+
+/* 功能表：資訊列上面一小排分類，點了再往上多一排功能 */
+#funcBar, #funcSub { position: fixed; left: 8px; display: flex; gap: 5px; z-index: 2; }
+#funcBar { bottom: 174px; }
+#funcSub { bottom: 210px; display: none; padding: 5px; flex-wrap: wrap; max-width: calc(100% - 16px);
+  background: #e9d9c4ee; border: 2px dashed var(--stitch); border-radius: 12px; box-shadow: 0 3px 10px #0002; }
+#funcSub.open { display: flex; }
+#funcBar button, #funcSub button { position: relative; font: inherit; font-size: 13px; color: var(--ink); cursor: pointer; white-space: nowrap;
+  display: flex; align-items: center; gap: 4px; border-radius: 10px; border: 2px solid var(--stitch); background: var(--cream); }
+#funcBar button { padding: 3px 10px; box-shadow: 0 2px 0 #d8c3ab; }
+#funcBar button.on { border-color: var(--accent); background: #fff; transform: translateY(-2px); }
+#funcSub button { padding: 6px 10px 4px; min-height: 40px; background: #fff; }
+#funcSub button:hover, #funcBar button:hover { border-color: var(--accent); }
+#funcSub button.on { border-color: var(--accent); background: #fdecef; }
+#funcSub button:disabled, #funcSub button.poor { opacity: .45; }
+#funcSub .ico, #funcBar .ico { font-size: 16px; }
+#funcSub .cost { font-size: 10px; color: #a06a10; }
+#funcSub .key { position: absolute; right: 4px; top: 0; font-size: 9px; opacity: .5; }
+
+/* 框選 */
+#dragBox { position: fixed; display: none; border: 1.5px solid #7dff7d; background: #7dff7d22; pointer-events: none; }
+
+#help { position: fixed; left: 10px; top: 60px; font-size: 12px; padding: 6px 10px; max-width: 300px; line-height: 1.6; opacity: .9; }
+@media (max-width: 1100px) { #minimap { width: 220px; height: 110px; } }
 
 #over { position: fixed; inset: 0; display: none; flex-direction: column; align-items: center; justify-content: center;
   gap: 16px; background: #0006; font-size: 28px; color: #fff; }
@@ -53,6 +116,19 @@ html, body { margin: 0; height: 100%; overflow: hidden; background: #f3e9dc; col
 
 #over small { font-size: 16px; opacity: .9; }
 #overTxt { text-align: center; line-height: 1.5; }
+
+/* 暫停選單（ESC） */
+#pauseMenu { position: fixed; inset: 0; display: none; align-items: center; justify-content: center; background: #0006; z-index: 9; }
+#pauseMenu.open { display: flex; }
+#pauseMenu .card { width: 340px; max-width: calc(100% - 32px); padding: 18px 22px; text-align: center; background: var(--cream);
+  border: 2px dashed var(--stitch); border-radius: 18px; box-shadow: 0 4px 0 #d8c3ab, 0 14px 40px #0004; }
+#pauseMenu h2 { margin: 0 0 12px; color: #6b4a2a; }
+#pauseMenu button { display: block; width: 100%; margin: 8px 0; padding: 9px; font: inherit; font-size: 16px; border-radius: 12px;
+  border: 2px solid var(--stitch); background: #fff; color: var(--ink); cursor: pointer; }
+#pauseMenu button:hover { border-color: var(--accent); }
+#pauseMenu button small { opacity: .5; font-size: 11px; }
+#pmHelpText { display: none; margin-top: 10px; text-align: left; font-size: 12px; line-height: 1.7; }
+#pmHelpText.show { display: block; }
 
 /* 標題畫面 */
 #title { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; padding: 16px;
@@ -72,7 +148,7 @@ html, body { margin: 0; height: 100%; overflow: hidden; background: #f3e9dc; col
 #title .demo-note { margin: 10px 0 0; font-size: 11px; opacity: .55; }
 
 /* DEMO 模式：藏起除錯用的東西（按 ` 或網址加 ?dev 顯示） */
-body.demo #stats, body.demo #toolbar .tool.debug { display: none; }
+body.demo #stats, body.demo #cmdCard .cmd.debug, body.demo #funcSub .fn.debug { display: none; }
 
 .lil-gui.root { top: 10px !important; right: 10px !important; }
 @media (max-width: 1250px) { #help { display: none; } }

@@ -44,6 +44,11 @@ export class Renderer2D {
   showFlow = false;
   unitShadows = true;
   selected: Building | null = null;
+  /** 選取的部隊：unitSel[i] = 1（main.ts 設定） */
+  unitSel: Uint8Array | null = null;
+  /** 下指令時地上閃一下的標記（t＝剩下秒數） */
+  pings: { x: number; y: number; t: number; color: string }[] = [];
+  private lastFrame = performance.now();
 
   private ctx: CanvasRenderingContext2D;
   private world!: World;
@@ -81,6 +86,7 @@ export class Renderer2D {
     void this.art.loadAll();
     void this.loadViewSprites();
     void this.loadProjectiles();
+    void this.loadTownCenter();
     addEventListener('resize', () => this.resize());
     this.resize();
   }
@@ -156,7 +162,26 @@ export class Renderer2D {
     this.rockSprites = [0, 1, 2].map((i) => paintRock(i));
   }
 
+  /** 市鎮中心五個階段的圖（public/sprites/buildings/town_center_<1-5>.png，已去背） */
+  private townCenter: Sprite[] = [];
+  private async loadTownCenter(): Promise<void> {
+    // 畫面寬度（佔地 3 格的菱形是 192px，美術含廣場比佔地大；越高階越大）與腳底中心在圖上的位置（由上往下比例）
+    const look: [number, number][] = [[250, 0.80], [270, 0.80], [290, 0.80], [340, 0.82], [370, 0.85]];
+    await Promise.all(look.map(async ([wPx, ayFrac], i) => {
+      const im = await loadImage(`${import.meta.env.BASE_URL}sprites/buildings/town_center_${i + 1}.png`);
+      if (!im) return;
+      const cw = Math.round(wPx * SPRITE_SCALE), ch = Math.round((im.naturalHeight / im.naturalWidth) * cw);
+      const c = document.createElement('canvas');
+      c.width = cw; c.height = ch;
+      const g = c.getContext('2d')!;
+      g.imageSmoothingQuality = 'high';
+      g.drawImage(im, 0, 0, cw, ch);
+      this.townCenter[i] = { canvas: c, ax: cw / 2, ay: ch * ayFrac, top: (ch * ayFrac) / SPRITE_SCALE };
+    }));
+  }
+
   private buildingSprite(b: Building): Sprite {
+    if (b.kind === BK.Base && this.townCenter[b.level - 1]) return this.townCenter[b.level - 1];
     const key = `${b.kind}:${b.level}`;
     let s = this.buildingSprites.get(key);
     if (!s) {
@@ -241,16 +266,21 @@ export class Renderer2D {
   }
 
   // ---------------------------------------------------------------- 對外介面（和 3D 版相同）
+  /** 單位頭像：面向鏡頭的那張圖（介面用）；還沒準備好回傳 null */
+  portrait(kind: number): HTMLCanvasElement | null {
+    return this.unitSprites[kind]?.[1]?.canvas ?? null;
+  }
+
   setGhost(visible: boolean, tx = 0, ty = 0, size = 1, ok = true): void {
     Object.assign(this.ghost, { visible, tx, ty, size, ok });
   }
 
   drawStats(): string {
-    return `2D 斜角  畫了 ${this.drawn} 張圖  縮放 ${this.cam.zoom.toFixed(2)}`;
+    return `2D 斜角  畫了 ${this.drawn} 張圖  縮放 ${this.cam.zoom.toFixed(2)}  解析度 ${Math.round(this.renderScale * 100)}%`;
   }
 
   private resize(): void {
-    this.dpr = Math.min(devicePixelRatio, 2);
+    this.dpr = Math.min(devicePixelRatio, 2) * this.renderScale;
     const w = this.container.clientWidth, h = this.container.clientHeight;
     this.canvas.width = Math.round(w * this.dpr);
     this.canvas.height = Math.round(h * this.dpr);
@@ -258,15 +288,39 @@ export class Renderer2D {
     this.canvas.style.height = `${h}px`;
   }
 
+  /**
+   * 自動解析度：畫一幀太久（沒有顯示卡加速的瀏覽器，每個像素都要 CPU 畫）就降低內部解析度，
+   * 由瀏覽器放大顯示；變快了再調回來。1 = 原始解析度，最低 0.5。
+   */
+  renderScale = 1;
+  autoScale = true;
+  private frameMs = 0;
+  private scaleCooldown = 0;
+  private adaptScale(ms: number): void {
+    this.frameMs = this.frameMs * 0.9 + ms * 0.1;
+    if (!this.autoScale || --this.scaleCooldown > 0) return;
+    let s = this.renderScale;
+    if (this.frameMs > 20 && s > 0.5) s = Math.max(0.5, s - 0.1);
+    else if (this.frameMs < 8 && s < 1) s = Math.min(1, s + 0.1);
+    if (s !== this.renderScale) { this.renderScale = s; this.resize(); this.scaleCooldown = 30; }
+  }
+
   // ---------------------------------------------------------------- 每幀
   render(alpha: number): void {
+    const t0 = performance.now();
+    this.renderFrame(alpha);
+    this.adaptScale(performance.now() - t0);
+  }
+
+  private renderFrame(alpha: number): void {
     const g = this.ctx, w = this.world, map = w.map, z = this.cam.zoom;
     const [ox, oy] = this.cam.originOnScreen();
     g.setTransform(1, 0, 0, 1, 0, 0);
     g.fillStyle = '#f3e9dc';
     g.fillRect(0, 0, this.canvas.width, this.canvas.height);
     g.setTransform(z * this.dpr, 0, 0, z * this.dpr, ox * this.dpr, oy * this.dpr);
-    g.imageSmoothingQuality = 'high';
+    // 降解析度時圖片縮放也用比較省的取樣
+    g.imageSmoothingQuality = this.renderScale >= 1 ? 'high' : 'low';
 
     // 可見範圍（世界像素）
     const vw = this.canvas.width / this.dpr / z, vh = this.canvas.height / this.dpr / z;
@@ -283,6 +337,7 @@ export class Renderer2D {
     }
     if (this.showFlow) this.drawFlow(g);
     this.drawGroundMarks(g);
+    this.drawUnitMarks(g, alpha);
     this.drawTraps(g);
 
     // 收集要畫的東西，依「離鏡頭的遠近」（x+y）排序：後面的先畫
@@ -302,7 +357,8 @@ export class Renderer2D {
       shadows.push([sx, sy0, b.size * 0.55]);
       items.push({ k: cx + cy + b.size * 0.3, draw: () => { this.drawSprite(g, sp, sx, sy, 1, false); this.drawBar(g, b, sx, sy - sp.top - 8); } });
     }
-    const u = w.units, t = w.time;
+    const u = w.units, t = w.time, sel = this.unitSel;
+    const bars: [number, number, number][] = [];
     for (let i = 0; i < u.hi; i++) {
       if (!u.alive[i]) continue;
       const x = u.px[i] + (u.x[i] - u.px[i]) * alpha, y = u.py[i] + (u.y[i] - u.py[i]) * alpha;
@@ -310,20 +366,23 @@ export class Renderer2D {
       if (!onScreen(sx, sy, 40)) continue;
       const k = u.kind[i], kind = UNIT_KINDS[k];
       const moving = u.vx[i] * u.vx[i] + u.vy[i] * u.vy[i] > 0.05;
-      const bob = moving ? Math.abs(Math.sin(t * 12 + i)) * 0.12 * kind.scale : 0;
+      // 走路一跳一跳；有輪子的器具用滑的
+      const bob = moving && !kind.wheeled ? Math.abs(Math.sin(t * 12 + i)) * 0.12 * kind.scale : 0;
       const dir = ((Math.round(u.face[i] / ((Math.PI * 2) / DIRS)) % DIRS) + DIRS) % DIRS;
       const curl = u.curled[i] && this.curlSprites[k];
       const sp = (u.hitT[i] > 0 ? (curl ? this.curlFlash : this.unitFlash) : (curl ? this.curlSprites : this.unitSprites))[k][dir];
       if (this.unitShadows) shadows.push([sx, sy, kind.radius * 1.3]);
+      if (sel && sel[i]) bars.push([sx, sy - sp.top - 4, u.hp[i] / u.maxHp[i]]);
       items.push({ k: x + y, draw: () => this.drawSprite(g, sp, sx, sy - bob * HEIGHT_PX, 1, false) });
     }
-    // 影子（壓扁的橢圓）先畫，所有東西都在影子上面
+    // 影子（壓扁的橢圓）先畫，所有東西都在影子上面；全部合成一條路徑一次填色（省很多次填色）
     g.fillStyle = 'rgba(60,40,30,0.22)';
+    g.beginPath();
     for (const [sx, sy, r] of shadows) {
-      g.beginPath();
+      g.moveTo(sx + r * PX_PER_UNIT, sy);
       g.ellipse(sx, sy, r * PX_PER_UNIT, r * PX_PER_UNIT * 0.5, 0, 0, Math.PI * 2);
-      g.fill();
     }
+    g.fill();
     items.sort((a, b) => a.k - b.k);
     for (const it of items) it.draw();
     this.drawn = items.length;
@@ -331,6 +390,70 @@ export class Renderer2D {
     this.drawShots(g);
     this.drawFx(g);
     this.drawSelectionTop(g);
+    // 選取部隊的血條
+    for (const [bx, by, r] of bars) {
+      g.fillStyle = 'rgba(0,0,0,0.4)';
+      g.fillRect(bx - 11, by - 1, 22, 5);
+      g.fillStyle = r > 0.5 ? '#5ad35a' : r > 0.25 ? '#f0c040' : '#e05050';
+      g.fillRect(bx - 10, by, 20 * Math.max(0, r), 3);
+    }
+  }
+
+  /** 選取部隊腳下的圈、指令路線、下指令時的標記 */
+  private drawUnitMarks(g: CanvasRenderingContext2D, alpha: number): void {
+    const now = performance.now(), fdt = (now - this.lastFrame) / 1000;
+    this.lastFrame = now;
+    const sel = this.unitSel, u = this.world.units;
+    if (sel) {
+      // 路線：目前的目的地 → 佇列裡的下一個…（同一個點只畫一次旗子）
+      g.strokeStyle = 'rgba(255,255,255,0.45)';
+      g.lineWidth = 1.2;
+      g.setLineDash([4, 4]);
+      g.beginPath();
+      const flags: [number, number, number][] = [];
+      for (let i = 0; i < u.hi; i++) {
+        if (!u.alive[i] || !sel[i] || u.order[i] === 0) continue;
+        const x = u.px[i] + (u.x[i] - u.px[i]) * alpha, y = u.py[i] + (u.y[i] - u.py[i]) * alpha;
+        let [ax, ay] = toScreen(x, y);
+        const pts: [number, number, number][] = [[u.ordX[i], u.ordY[i], u.order[i]], ...this.world.queuedOrders(i).map((o) => [o.x, o.y, o.ord] as [number, number, number])];
+        for (const [px, py, o] of pts) {
+          const [bx, by] = toScreen(px, py);
+          g.moveTo(ax, ay); g.lineTo(bx, by);
+          ax = bx; ay = by;
+          flags.push([bx, by, o]);
+        }
+      }
+      g.stroke();
+      g.setLineDash([]);
+      for (const [fx, fy, o] of flags) {
+        g.fillStyle = o === 1 ? 'rgba(120,220,120,0.8)' : o === 4 ? 'rgba(90,160,240,0.8)' : 'rgba(240,90,90,0.8)';
+        g.beginPath(); g.ellipse(fx, fy, 3, 1.5, 0, 0, Math.PI * 2); g.fill();
+      }
+      // 腳下的選取圈
+      g.strokeStyle = '#7dff7d';
+      g.lineWidth = 1.6;
+      g.beginPath();
+      for (let i = 0; i < u.hi; i++) {
+        if (!u.alive[i] || !sel[i]) continue;
+        const x = u.px[i] + (u.x[i] - u.px[i]) * alpha, y = u.py[i] + (u.y[i] - u.py[i]) * alpha;
+        const [sx, sy] = toScreen(x, y), r = u.rad[i] * 1.35 * PX_PER_UNIT;
+        g.moveTo(sx + r, sy);
+        g.ellipse(sx, sy, r, r * 0.5, 0, 0, Math.PI * 2);
+      }
+      g.stroke();
+    }
+    // 指令標記：縮小的圈
+    for (const p of this.pings) {
+      p.t -= fdt;
+      if (p.t <= 0) continue;
+      const [sx, sy] = toScreen(p.x, p.y), k = p.t / 0.6;
+      g.strokeStyle = p.color;
+      g.globalAlpha = Math.min(1, k * 1.5);
+      g.lineWidth = 2.5;
+      g.beginPath(); g.ellipse(sx, sy, 6 + 16 * k, (6 + 16 * k) * 0.5, 0, 0, Math.PI * 2); g.stroke();
+      g.globalAlpha = 1;
+    }
+    if (this.pings.length && this.pings.every((p) => p.t <= 0)) this.pings.length = 0;
   }
 
   private drawSprite(g: CanvasRenderingContext2D, s: Sprite, sx: number, sy: number, scale: number, flip: boolean): void {

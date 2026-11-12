@@ -52,12 +52,13 @@ export const ART_SLOTS: ArtSlot[] = [
   unit('sheep', '綿羊兵（羊人）', UK.Sheep, 'front', { height: 1.2, depth: 0.3, bgTolerance: 30 }),
   // 新兵種：2D 版用 public/sprites/<id>/ 的設定圖多視角（見 docs/art-pipeline.md）
   unit('lancer', '長槍兵', UK.Lancer, 'front', { height: 1.2, bgTolerance: 30 }),
-  unit('archer', '弓箭手', UK.Archer, 'front', { height: 1.15, bgTolerance: 26 }),
-  unit('catapult', '投石車', UK.Catapult, 'front', { height: 1.1, bgTolerance: 26 }),
+  unit('archer', '弓箭手', UK.Archer, 'front', { height: 1.15, bgTolerance: 36 }),
+  // 設定圖底色是米色漸層，26 去不乾淨（右上角殘留米色塊）→ 40
+  unit('catapult', '投石車', UK.Catapult, 'front', { height: 1.1, bgTolerance: 40 }),
   unit('horn', '號角手', UK.Horn, 'front', { height: 1.15, bgTolerance: 26 }),
   unit('spineball', '刺球衛', UK.Spineball, 'front', { height: 1.1, bgTolerance: 26 }),
   unit('javelin', '豪豬標槍手', UK.Javelin, 'front', { height: 1.15, bgTolerance: 26 }),
-  unit('ballista', '尖刺弩砲', UK.Ballista, 'front', { height: 1.0, bgTolerance: 26 }),
+  unit('ballista', '尖刺弩砲', UK.Ballista, 'front', { height: 1.0, bgTolerance: 36 }),
   unit('trapper', '陷阱工程師', UK.Trapper, 'front', { height: 1.1, bgTolerance: 26 }),
   unit('dogcav', '狗狗騎兵', UK.DogCav, 'front', { height: 1.0, bgTolerance: 26 }),
   unit('barker', '吠叫兵', UK.Barker, 'front', { height: 1.0, bgTolerance: 26 }),

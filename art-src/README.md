@@ -20,7 +20,7 @@
 
 ## 每個兵種資料夾
 - 設定圖原檔
-- `views/v0.png…`：從設定圖「多視角」那一排依序裁下的每個角度（裁切位置記在 tools 以外的暫存腳本裡，之後要重裁可以照著設定圖的版面再做）
+- `views/v0.png…`：從設定圖「多視角」那一排依序裁下的每個角度（要重裁用 `tools/recrop-views.ps1`：在設定圖上找到原本的位置、照主體重裁，隔壁的東西和文字塗成底色）
 
 ## 對應到 8 個方向
 `public/sprites/<名字>/` 的檔名一律以**畫面上臉朝哪邊**為準（設定圖上的「右側」有時畫成臉朝左，以實際畫面為準）：
@@ -34,3 +34,17 @@
 | `back.png` | 背對鏡頭 |
 
 缺的方向會用另一邊鏡像代替（見 `src/render2d/sprites2d.ts` 的 `DIR_VIEWS`）。
+
+## 建築（`buildings/`）
+
+| 建築 | 資料夾 | 設定圖 | 遊戲圖 |
+|---|---|---|---|
+| 🌳 世界樹市鎮中心 | `buildings/town-center/` | ✅ 五個階段（`stage1`…`stage5`；被換掉的舊版在 `old/`） | `public/sprites/buildings/town_center_1…5.png` |
+| 📦 倉庫 | `buildings/warehouse/` | ✅ | 還沒做 |
+| 🏠 房屋 | `buildings/house/` | ✅ | 還沒做 |
+| 🌾 穀倉 | `buildings/granary/` | ✅ | 還沒做 |
+| ⚒️ 兵工廠 | `buildings/arsenal/` | ✅ 三個階段 | 還沒做 |
+| 🚜 農場 | `buildings/farm/` | ✅ 三個階段 | 還沒做 |
+| 🔮 魔法研究院 | `buildings/research/` | ✅ 三個階段 | 還沒做 |
+
+建築只用設定圖上的「45° 俯視（主視角）」一張：`tools/cutout-building.ps1` 裁下來並去背成透明 PNG（背景是模糊的漸層光暈，用「顏色平滑延伸」判斷背景）。

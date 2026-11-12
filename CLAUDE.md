@@ -19,7 +19,10 @@
   - `units.ts` — 單位用 SoA typed arrays（不要改成每單位一個物件）
   - `spatialHash.ts` — 每 tick 重建的網格，碰撞/索敵都用它
   - `flowfield.ts` — 從城堡出發的 Dijkstra 流場，所有敵人共用；建築格成本高 → 會拆牆
-  - `world.ts` — 遊戲規則、AI、波次、建築、碰撞
+  - `world.ts` — 遊戲規則、AI、波次、建築、碰撞、執行部隊指令（`command()`）
+  - `orders.ts` — 部隊指令種類與陣型計算（參考世紀帝國 4）
+- `src/ui/army.ts` — 部隊的選取、編隊、把滑鼠鍵盤轉成指令（只呼叫 `World.command`，不直接改單位）
+- `src/ui/hud.ts` — 最下方資訊列（資訊／編隊＋選取格子／指令卡）；`src/ui/minimap.ts` — 右下角小地圖
 - `src/render2d/` — **預設的 2D 斜角繪圖**（Canvas 2D，方格地圖畫成菱形；網址加 `?3d` 改用 3D 版）
   - `iso.ts` — 斜角投影（世界 ↔ 螢幕）與 2D 鏡頭
   - `sprites2d.ts` — 直接用 Canvas 畫的建築、毛球怪、樹、石頭；`spritesFromViews` 把設定圖的 5 個角度變成 8 方向圖（`public/sprites/<插槽名>/`，羊人用這個）

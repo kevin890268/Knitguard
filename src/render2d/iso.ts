@@ -29,7 +29,7 @@ export function toWorld(sx: number, sy: number): [number, number] {
 }
 
 /**
- * 2D 鏡頭：WASD/方向鍵平移、滾輪縮放（以滑鼠為中心）、右鍵或中鍵拖曳平移。
+ * 2D 鏡頭：方向鍵平移、滾輪縮放（以滑鼠為中心）、右鍵或中鍵拖曳平移。
  * 介面和 3D 的 RtsCamera 一樣有 update() 和 pick()，main.ts 不用分兩套。
  */
 export class IsoCamera {
@@ -43,6 +43,8 @@ export class IsoCamera {
   /** 相容 3D 鏡頭的欄位（main.ts 用它設定開場位置） */
   readonly target = { set: (x: number, _y: number, z: number) => { this.cx = x; this.cy = z; } };
 
+  /** WASD 能不能移動鏡頭（main.ts 設成「沒選部隊時」） */
+  allowWasd: () => boolean = () => true;
   private keys = new Set<string>();
   private dragging = false;
   private lastX = 0;
@@ -88,10 +90,12 @@ export class IsoCamera {
     const k = this.keys;
     // 螢幕上的上下左右 → 世界方向
     let sx = 0, sy = 0;
-    if (k.has('w') || k.has('arrowup')) sy -= 1;
-    if (k.has('s') || k.has('arrowdown')) sy += 1;
-    if (k.has('d') || k.has('arrowright')) sx += 1;
-    if (k.has('a') || k.has('arrowleft')) sx -= 1;
+    // 方向鍵隨時可以；WASD 只在 allowWasd()（沒選部隊）時移動，選了部隊 A/S 是指令
+    const wasd = this.allowWasd();
+    if (k.has('arrowup') || (wasd && k.has('w'))) sy -= 1;
+    if (k.has('arrowdown') || (wasd && k.has('s'))) sy += 1;
+    if (k.has('arrowright') || (wasd && k.has('d'))) sx += 1;
+    if (k.has('arrowleft') || (wasd && k.has('a'))) sx -= 1;
     if (sx || sy) {
       const spd = (900 * dt) / this.zoom;
       const [wx, wy] = toWorld(sx * spd, sy * spd * 0.75);
@@ -113,6 +117,14 @@ export class IsoCamera {
     const r = this.dom.getBoundingClientRect();
     const [ox, oy] = this.originOnScreen();
     return toWorld((clientX - r.left - ox) / this.zoom, (clientY - r.top - oy) / this.zoom);
+  }
+
+  /** 世界座標（x, y＝地面、h＝高度）→ 螢幕座標（選取部隊用） */
+  worldToClient(x: number, y: number, h = 0): [number, number] {
+    const r = this.dom.getBoundingClientRect();
+    const [ox, oy] = this.originOnScreen();
+    const [sx, sy] = toScreen(x, y, h);
+    return [r.left + ox + sx * this.zoom, r.top + oy + sy * this.zoom];
   }
 
   /** 和 3D 鏡頭相同的介面：滑鼠 → 地面點（x, z 是世界 x, y） */

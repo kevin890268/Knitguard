@@ -15,20 +15,31 @@
     <span>☠️ <b id="hKills">0</b></span>
   </div>
   <div id="stats"></div>
-  <div id="toolbar"></div>
-  <div id="selPanel">
-    <div id="selInfo"></div>
-    <div class="row">
-      <button id="selUp">升級</button>
-      <button id="selSell">拆除</button>
-      <button id="selRally">🚩 集結點</button>
+  <!-- 功能表：資訊列上面一小排分類；點分類，上面再多一排（funcSub）顯示它的功能 -->
+  <div id="funcSub"></div>
+  <div id="funcBar"></div>
+  <!-- 最下方資訊列（參考世紀帝國 4）：資訊｜編隊＋選取格子｜指令卡｜小地圖 -->
+  <div id="bottomBar">
+    <div id="infoPanel" class="sec"></div>
+    <div id="midPanel" class="sec">
+      <div id="groups"></div>
+      <div id="selGrid"></div>
     </div>
+    <div id="cmdCard" class="sec"></div>
+    <div id="mapPanel" class="sec"><canvas id="minimap" width="300" height="150"></canvas></div>
   </div>
-  <div id="help">
-    左鍵：使用工具（牆可拖曳）<br>
-    右鍵拖曳：旋轉　滾輪：縮放<br>
-    WASD：移動　Q/E：轉向<br>
-    空白：下一波　P：暫停　F：流場　U：升級
+  <div id="dragBox"></div>
+  <div id="help"></div>
+  <!-- 暫停選單（ESC） -->
+  <div id="pauseMenu">
+    <div class="card">
+      <h2>⏸ 暫停</h2>
+      <button id="pmResume">▶ 繼續遊戲 <small>Esc</small></button>
+      <button id="pmHelp">📖 操作說明</button>
+      <button id="pmRestart">🎲 重新開始（新地圖）</button>
+      <button id="pmTitle">🏠 回到標題畫面</button>
+      <div id="pmHelpText"></div>
+    </div>
   </div>
   <div id="over"><div id="overTxt"></div><button id="overBtn">🎲 再來一局</button></div>
   <div id="title">
@@ -41,7 +52,8 @@
         <li>🐑 <b>羊族</b>：長槍兵、弓箭手、投石車、號角手（幫周圍加攻擊）</li>
         <li>🦔 <b>刺刺族</b>：刺球衛（敵人靠近自動縮球）、豪豬標槍手、尖刺弩砲（貫穿一整排）、陷阱工程師</li>
         <li>🐕 <b>狗族</b>：騎兵、吠叫兵（讓敵人變慢）、聖伯納救援犬（治療）</li>
-        <li>🖱️ 每種兵各 10 隻已經守在城堡旁；右鍵拖曳平移、滾輪縮放；<b>空白鍵</b>可以提早叫下一波</li>
+        <li>🖱️ 每種兵各 10 隻已經守在城堡旁；<b>左鍵框選</b>部隊、<b>右鍵</b>移動或攻擊，A 攻擊移動、H 堅守；Ctrl+數字 編隊</li>
+        <li>🗺️ 方向鍵或右鍵拖曳平移、滾輪縮放；<b>空白鍵</b>可以提早叫下一波</li>
       </ul>
       <button id="titleStart">🧶 開始守護</button>
       <p class="demo-note">兵種 DEMO · 第一波 25 秒後出發</p>

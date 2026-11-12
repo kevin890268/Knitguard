@@ -25,6 +25,18 @@ export type UnitSkill =
   | { type: 'bark'; radius: number }
   | { type: 'heal'; radius: number; amount: number; cd: number };
 
+/**
+ * 我方部隊的視野（格）：待命、攻擊移動、巡邏時，這個範圍內有敵人就會圍過去打（取兵種索敵範圍和這個的較大值）。
+ * 隊友在 ASSIST 格內正在打架時，也會一起去打同一個目標。
+ */
+export const PLAYER_SIGHT = 7;
+export const ASSIST = 3.5;
+/**
+ * 小隊（一起下令的單位）：有隊員開打，離戰鬥 pull 格內的隊員全部圍過去（在戰鬥點 fight 格內找敵人）；
+ * 輔助兵（號角手、救援犬）跟到離戰鬥點 supportGap 格的地方
+ */
+export const SQUAD = { pull: 16, fight: 6, supportGap: 3 };
+
 /** 被減速（吠叫、陷阱）時的效果：移動和攻擊速度都 −40%，持續 SLOW.dur 秒 */
 export const SLOW = { move: 0.4, attack: 0.4, dur: 2.5 };
 
@@ -64,6 +76,8 @@ export interface UnitKind {
   support?: boolean;
   /** 遠程丟出去的東西（畫面上會飛過去，飛到才扣血） */
   proj?: ProjKind;
+  /** 有輪子的器具（投石車、弩砲）：移動時用滑的，不像步兵一跳一跳 */
+  wheeled?: boolean;
 }
 
 export const UK = {
@@ -84,12 +98,12 @@ export const UNIT_KINDS: UnitKind[] = [
   // ---- 羊族
   { name: '長槍兵', team: P, hp: 110, speed: 2.2, radius: 0.32, damage: 9, attackCd: 0.9, reach: 0.35, aggro: 4.5, reward: 0, color: 0xfffaf0, scale: 0.7, model: 'sheep', armor: H, meleeDef: 4, rangedDef: 2, bonusLarge: 10 },
   { name: '弓箭手', team: P, hp: 50, speed: 2.4, radius: 0.28, damage: 6, attackCd: 1.0, reach: 0.1, aggro: 7.5, reward: 0, color: 0xfffaf0, scale: 0.62, model: 'sheep', armor: L, range: 6, bonusLight: 4, proj: 'arrow' },
-  { name: '投石車', team: P, hp: 140, speed: 1.2, radius: 0.5, damage: 40, attackCd: 3.2, reach: 0.1, aggro: 10.5, reward: 0, color: 0xfffaf0, scale: 1.15, model: 'sheep', armor: H, meleeDef: 1, rangedDef: 5, range: 9, bonusHeavy: 20, proj: 'stone' },
+  { name: '投石車', team: P, hp: 140, speed: 1.2, radius: 0.5, damage: 40, attackCd: 3.2, reach: 0.1, aggro: 10.5, reward: 0, color: 0xfffaf0, scale: 1.15, model: 'sheep', armor: H, meleeDef: 1, rangedDef: 5, range: 9, bonusHeavy: 20, proj: 'stone', wheeled: true },
   { name: '號角手', team: P, hp: 55, speed: 2.4, radius: 0.28, damage: 0, attackCd: 1, reach: 0.1, aggro: 0, reward: 0, color: 0xfffaf0, scale: 0.62, model: 'sheep', armor: L, support: true, skill: { type: 'horn', radius: 4, atk: 3 } },
   // ---- 刺刺族
   { name: '刺球衛', team: P, hp: 130, speed: 1.8, radius: 0.38, damage: 6, attackCd: 1.0, reach: 0.15, aggro: 4, reward: 0, color: 0xfffaf0, scale: 0.75, model: 'sheep', armor: H, meleeDef: 3, rangedDef: 3, skill: { type: 'curl', radius: 2.2, def: 6, reflect: 4, slow: 0.8 } },
   { name: '豪豬標槍手', team: P, hp: 60, speed: 2.3, radius: 0.3, damage: 10, attackCd: 1.2, reach: 0.1, aggro: 5, reward: 0, color: 0xfffaf0, scale: 0.65, model: 'sheep', armor: L, meleeDef: 1, range: 3.5, bonusHeavy: 5, proj: 'javelin' },
-  { name: '尖刺弩砲', team: P, hp: 120, speed: 1.2, radius: 0.5, damage: 12, attackCd: 2.5, reach: 0.1, aggro: 10.5, reward: 0, color: 0xfffaf0, scale: 1.1, model: 'sheep', armor: H, rangedDef: 4, range: 9, proj: 'spike', skill: { type: 'pierce', width: 0.45 } },
+  { name: '尖刺弩砲', team: P, hp: 120, speed: 1.2, radius: 0.5, damage: 12, attackCd: 2.5, reach: 0.1, aggro: 10.5, reward: 0, color: 0xfffaf0, scale: 1.1, model: 'sheep', armor: H, rangedDef: 4, range: 9, proj: 'spike', skill: { type: 'pierce', width: 0.45 }, wheeled: true },
   { name: '陷阱工程師', team: P, hp: 60, speed: 2.2, radius: 0.3, damage: 3, attackCd: 1.2, reach: 0.1, aggro: 7, reward: 0, color: 0xfffaf0, scale: 0.65, model: 'sheep', armor: L, support: true, skill: { type: 'trap', cd: 4, dmg: 15, max: 3 } },
   // ---- 狗族（全部輕甲）
   { name: '狗狗騎兵', team: P, hp: 75, speed: 4.2, radius: 0.32, damage: 10, attackCd: 0.8, reach: 0.15, aggro: 6, reward: 0, color: 0xfffaf0, scale: 0.65, model: 'sheep', armor: L, meleeDef: 1 },
@@ -104,7 +118,9 @@ export interface BuildingKind {
   hp: number;
   cost: number;
   color: number;
-  upgradeCost: number[]; // [升到 Lv2, 升到 Lv3]
+  upgradeCost: number[]; // [升到 Lv2, 升到 Lv3, …]，長度決定最高等級
+  /** 各等級的名稱（市鎮中心的五個階段） */
+  levelNames?: string[];
   range?: number;
   damage?: number;
   cd?: number;
@@ -115,7 +131,9 @@ export const BK = { Base: 0, Wall: 1, Tower: 2, Barracks: 3 } as const;
 export const MAX_LEVEL = 3;
 
 export const BUILDING_KINDS: BuildingKind[] = [
-  { name: '毛線城堡', icon: '🏰', size: 3, hp: 2000, cost: 0, color: 0xf2a7b5, upgradeCost: [] },
+  // 世界樹・聯盟市鎮中心：五個階段（美術在 public/sprites/buildings/town_center_<階段>.png）
+  { name: '世界樹市鎮中心', icon: '🌳', size: 3, hp: 2000, cost: 0, color: 0xf2a7b5, upgradeCost: [150, 300, 500, 800],
+    levelNames: ['樹苗屋', '小樹屋', '繁榮樹城', '盟都', '永恆聖都'] },
   { name: '毛氈牆', icon: '🧱', size: 1, hp: 250, cost: 4, color: 0xd9c4a0, upgradeCost: [6, 10] },
   { name: '線軸箭塔', icon: '🧵', size: 1, hp: 180, cost: 35, color: 0x7fb6e0, upgradeCost: [40, 80], range: 6.5, damage: 10, cd: 0.6 },
   { name: '羊圈', icon: '🐑', size: 2, hp: 400, cost: 60, color: 0xa9d494, upgradeCost: [60, 120], spawnCap: 3 },

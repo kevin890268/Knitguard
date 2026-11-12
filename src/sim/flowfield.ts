@@ -44,7 +44,9 @@ export class FlowField {
         if (c === Infinity) continue;
         const diag = k >= 4;
         if (diag && !diagOk(x, y, DX[k], DY[k])) continue;
-        const nd = d + (diag ? c * SQRT2 : c);
+        // 先轉成 float32：dist 是 Float32Array，不轉的話存進去會被捨入得比 heap 裡的 key 小，
+        // 取出時 d > dist[i] 被誤判成過期而跳過 → 大片地圖算不到（敵人「卡住」的元凶之一）
+        const nd = Math.fround(d + (diag ? c * SQRT2 : c));
         if (nd < dist[n]) {
           dist[n] = nd;
           heap.push(n, nd);

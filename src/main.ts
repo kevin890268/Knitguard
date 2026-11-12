@@ -5,24 +5,29 @@ import { isTyping } from './render/camera';
 import { makeCutout } from './render/art/imageTo3d';
 import { GameRenderer } from './render/renderer';
 import { Renderer2D } from './render2d/renderer2d';
-import { BK, BUILDING_KINDS, UK } from './sim/data';
+import { BK, BUILDING_KINDS, UK, UNIT_KINDS } from './sim/data';
 import { MAX_UNITS, World } from './sim/world';
+import { ArmyControl } from './ui/army';
+import { Hud, type CardCmd } from './ui/hud';
+import { Minimap } from './ui/minimap';
+import { FuncBar } from './ui/funcBar';
 
 /** 預設是 2D 斜角；網址加 ?3d 用 3D 版 */
 const USE_3D = new URLSearchParams(location.search).has('3d');
 export type AnyRenderer = GameRenderer | Renderer2D;
 
 // ---------------------------------------------------------------- 工具列定義
+// 數字鍵留給編隊、A/S/H/R 留給部隊指令（參考世紀帝國 4），建造改用 Z/T/B
 type ToolId = 'select' | 'wall' | 'tower' | 'barracks' | 'erase' | 'rally' | 'sheep' | 'enemy';
 interface Tool { id: ToolId; key: string; icon: string; label: string; building?: number; debug?: boolean; }
 const TOOLS: Tool[] = [
   { id: 'select', key: 'Esc', icon: '👆', label: '選取' },
-  { id: 'wall', key: '1', icon: '🧱', label: '毛氈牆', building: BK.Wall },
-  { id: 'tower', key: '2', icon: '🧵', label: '線軸箭塔', building: BK.Tower },
-  { id: 'barracks', key: '3', icon: '🐑', label: '羊圈', building: BK.Barracks },
+  { id: 'wall', key: 'Z', icon: '🧱', label: '毛氈牆', building: BK.Wall },
+  { id: 'tower', key: 'T', icon: '🧵', label: '線軸箭塔', building: BK.Tower },
+  { id: 'barracks', key: 'B', icon: '🐑', label: '羊圈', building: BK.Barracks },
   { id: 'erase', key: 'X', icon: '✂️', label: '拆除' },
-  { id: 'sheep', key: '8', icon: '🐏', label: '放綿羊', debug: true },
-  { id: 'enemy', key: '9', icon: '👾', label: '放怪物', debug: true },
+  { id: 'sheep', key: 'N', icon: '🐏', label: '放綿羊', debug: true },
+  { id: 'enemy', key: 'M', icon: '👾', label: '放怪物', debug: true },
 ];
 
 const $ = (id: string) => document.getElementById(id)!;
@@ -31,9 +36,17 @@ const app = $('app');
 let world = new World(Math.floor(Math.random() * 1e6));
 const renderer: AnyRenderer = USE_3D ? new GameRenderer(app, MAX_UNITS) : new Renderer2D(app, MAX_UNITS);
 renderer.setWorld(world);
-$('help').innerHTML = USE_3D
-  ? '左鍵：使用工具（牆可拖曳）<br>右鍵拖曳：旋轉　滾輪：縮放<br>WASD：移動　Q/E：轉向<br>空白：下一波　P：暫停　F：流場　U：升級'
-  : '左鍵：使用工具（牆可拖曳）<br>右鍵拖曳：平移　滾輪：縮放<br>WASD：移動<br>空白：下一波　P：暫停　F：流場　U：升級';
+const army = new ArmyControl(() => world, renderer, MAX_UNITS);
+// 沒選部隊時 WASD 移動鏡頭；選了部隊 A＝攻擊移動、S＝停止
+renderer.cam.allowWasd = () => army.sel.length === 0;
+$('help').innerHTML =
+  '<b>部隊</b>　左鍵點選／框選　Shift 加選　雙擊選同兵種　Ctrl+A 全選<br>' +
+  '右鍵：移動／攻擊　Shift+右鍵：排路線<br>' +
+  'A 攻擊移動　R 巡邏　S 停止　H 堅守<br>' +
+  'Ctrl+數字 編隊　數字 選隊（按兩下跳過去）<br>' +
+  '<b>建造</b>　Z 牆　T 箭塔　B 羊圈　X 拆除　U 升級<br>' +
+  (USE_3D ? '方向鍵（沒選部隊時 WASD）移動　右鍵拖曳旋轉　Q/E 轉向　滾輪縮放<br>' : '方向鍵、右鍵拖曳（沒選部隊時 WASD）平移　滾輪縮放<br>') +
+  '空白：下一波　P：暫停　Esc：取消／暫停選單';
 
 let tool: ToolId = 'select';
 let mouse = { x: 0, y: 0, in: false };
@@ -91,19 +104,23 @@ function newWorld(seed?: number): void {
   world = new World(seed ?? Math.floor(Math.random() * 1e6));
   setupWorld(world);
   renderer.setWorld(world);
+  army.reset();
+  hud.invalidate();
   $('over').style.display = 'none';
 }
 
+const dragBox = $('dragBox');
 const loop = new GameLoop(
   (dt) => { if (started && !world.gameOver && !world.victory) world.step(dt); },
   (alpha, frameDt) => {
     renderer.cam.update(frameDt);
+    army.prune();
     updateGhost();
     renderer.render(alpha);
     if ((world.gameOver || world.victory) && $('over').style.display !== 'flex') {
       $('overTxt').innerHTML = world.victory
-        ? `🎉 守住山谷了！<br><small>撐過 ${world.wave} 波，擊殺 ${world.kills}，城堡還剩 ${Math.ceil(world.base.hp)} 耐久</small>`
-        : `💔 城堡被拆了！<br><small>撐到第 ${world.wave} 波，擊殺 ${world.kills}</small>`;
+        ? `🎉 守住山谷了！<br><small>撐過 ${world.wave} 波，擊殺 ${world.kills}，市鎮中心還剩 ${Math.ceil(world.base.hp)} 耐久</small>`
+        : `💔 市鎮中心被拆了！<br><small>撐到第 ${world.wave} 波，擊殺 ${world.kills}</small>`;
       $('over').style.display = 'flex';
     }
   },
@@ -139,37 +156,194 @@ $('titleStart').onclick = () => {
   started = true;
 };
 
-// ---------------------------------------------------------------- 工具列 UI
-const toolbar = $('toolbar');
-for (const t of TOOLS) {
-  const b = document.createElement('button');
-  b.id = 'tool_' + t.id;
-  b.className = 'tool' + (t.debug ? ' debug' : '');
-  const cost = t.building !== undefined ? `<span class="cost">💰${BUILDING_KINDS[t.building].cost}</span>` : '';
-  b.innerHTML = `<span class="ico">${t.icon}</span><span class="lbl">${t.label}</span>${cost}<span class="key">${t.key}</span>`;
-  b.onclick = () => setTool(t.id);
-  toolbar.appendChild(b);
+// ---------------------------------------------------------------- 暫停選單（ESC）
+let pausedBeforeMenu = false;
+function pauseOpen(): boolean { return $('pauseMenu').classList.contains('open'); }
+function setPauseMenu(open: boolean): void {
+  if (open === pauseOpen()) return;
+  if (open) { pausedBeforeMenu = loop.paused; loop.paused = true; }
+  else loop.paused = pausedBeforeMenu;
+  $('pauseMenu').classList.toggle('open', open);
+  $('pmHelpText').classList.remove('show');
 }
+$('pmResume').onclick = () => setPauseMenu(false);
+$('pmHelp').onclick = () => { $('pmHelpText').innerHTML = $('help').innerHTML; $('pmHelpText').classList.toggle('show'); };
+$('pmRestart').onclick = () => { setPauseMenu(false); loop.paused = false; newWorld(); };
+$('pmTitle').onclick = () => {
+  setPauseMenu(false); loop.paused = false;
+  newWorld();
+  started = false;
+  $('title').style.display = '';
+};
+$('pauseMenu').addEventListener('pointerdown', (e) => { if (e.target === $('pauseMenu')) setPauseMenu(false); }); // 點外面也關掉
+
+// ---------------------------------------------------------------- 最下方資訊列（參考世紀帝國 4）＋小地圖
 function setTool(id: ToolId): void {
   tool = id;
-  for (const t of TOOLS) $('tool_' + t.id).classList.toggle('on', t.id === id);
+  if (id !== 'select') army.mode = null;
 }
-setTool('select');
+const hud = new Hud({
+  getWorld: () => world,
+  army,
+  getBuilding: () => renderer.selected,
+  setBuilding: (b) => { renderer.selected = b; },
+  portrait: (k) => renderer.portrait(k),
+  // 沒選東西：指令卡空著（建造在上面的功能表）
+  buildCmds: () => [],
+  // 選到建築：升級、拆除、集結點
+  buildingCmds: (b) => {
+    const cost = world.upgradeCost(b);
+    const names = BUILDING_KINDS[b.kind].levelNames;
+    const next = names?.[b.level]; // 市鎮中心：下一個階段的名字
+    const up: CardCmd = { icon: '⬆️', label: cost === null ? '已滿級' : next ? `進化：${next}` : '升級', key: 'U', cost: cost ?? undefined,
+      tip: next ? `進化成「${next}」：更耐打` : '升級：更耐打、更強',
+      on: () => { world.upgrade(b); hud.invalidate(); }, disabled: () => cost === null || !world.canAfford(cost) };
+    if (b.kind === BK.Base) return [up];
+    const cmds: CardCmd[] = [
+      up,
+      { icon: '✂️', label: `拆除 +${Math.floor(b.invested * 0.5)}`, key: 'Del', tip: '拆掉，退一半的錢',
+        on: () => { world.removeBuilding(b, true); renderer.selected = null; } },
+    ];
+    if (b.kind === BK.Barracks) cmds.push({ icon: '🚩', label: '集結點', tip: '再點地面設集結點（也可以直接右鍵點地面）', on: () => setTool('rally'), active: () => tool === 'rally' });
+    return cmds;
+  },
+});
+// ---------------------------------------------------------------- 功能表（資訊列上面一小排；點分類，上面再多一排它的功能）
+/** 閒置的部隊：待命、沒在打、沒有堅守 */
+function idleUnits(): number[] {
+  const u = world.units, ids: number[] = [];
+  for (let i = 0; i < u.hi; i++) if (u.alive[i] && u.team[i] === 0 && u.order[i] === 0 && u.target[i] < 0 && !u.hold[i] && !UNIT_KINDS[u.kind[i]].support) ids.push(i);
+  return ids;
+}
+function lookAt(ids: number[]): void {
+  if (!ids.length) return;
+  const u = world.units;
+  let x = 0, y = 0;
+  for (const i of ids) { x += u.x[i]; y += u.y[i]; }
+  renderer.cam.target.set(x / ids.length, 0, y / ids.length);
+}
+const funcBar = new FuncBar([
+  {
+    id: 'build', icon: '🏗️', label: '建造',
+    items: () => TOOLS.filter((t) => t.id !== 'select').map((t): CardCmd => ({
+      icon: t.icon, label: t.label, key: t.key, debug: t.debug,
+      cost: t.building !== undefined ? BUILDING_KINDS[t.building].cost : undefined,
+      tip: t.building !== undefined ? `建造${t.label}（右鍵取消）` : t.label,
+      on: () => setTool(tool === t.id ? 'select' : t.id),
+      active: () => tool === t.id,
+    })),
+  },
+  {
+    id: 'army', icon: '⚔️', label: '部隊',
+    items: () => [
+      { icon: '🛡️', label: '全選部隊', key: 'Ctrl+A', on: () => { army.selectAll(); renderer.selected = null; } },
+      { icon: '💤', label: `閒置部隊 ${idleUnits().length}`, tip: '選取沒在做事的部隊（再點一次鏡頭跳過去）',
+        on: () => { const ids = idleUnits(); if (army.sel.length && army.sel.every((i) => ids.includes(i))) lookAt(ids); army.setSelection(ids, false); renderer.selected = null; } },
+      { icon: '🎯', label: '跳到選取的部隊', on: () => lookAt(army.sel), disabled: () => !army.sel.length },
+    ],
+  },
+  {
+    id: 'town', icon: '🌳', label: '市鎮中心',
+    items: () => {
+      const b = world.base, cost = world.upgradeCost(b), next = BUILDING_KINDS[b.kind].levelNames?.[b.level];
+      return [
+        { icon: '👆', label: '選取（鏡頭跳回）', on: () => { army.setSelection([], false); renderer.selected = b; renderer.cam.target.set(b.tx + 1.5, 0, b.ty + 1.5); } },
+        { icon: '⬆️', label: next ? `進化：${next}` : '已是最高階段', cost: cost ?? undefined,
+          on: () => { world.upgrade(b); hud.invalidate(); }, disabled: () => cost === null || !world.canAfford(cost) },
+      ];
+    },
+  },
+  {
+    id: 'system', icon: '⚙️', label: '系統',
+    items: () => [
+      { icon: '🌊', label: '叫下一波', key: '空白', on: () => { if (started) world.spawnWave(); } },
+      ...[1, 2, 3].map((s): CardCmd => ({ icon: '⏩', label: `速度 ×${s}`, on: () => { loop.timeScale = s; }, active: () => loop.timeScale === s })),
+      { icon: '⏸', label: '暫停選單', key: 'Esc', on: () => setPauseMenu(true) },
+    ],
+  },
+], () => (c) => world.canAfford(c));
+
+const minimap = new Minimap($('minimap') as HTMLCanvasElement, () => world, renderer, army);
+setInterval(() => minimap.render(), 100);
 
 // ---------------------------------------------------------------- 滑鼠
 const canvas = renderer.canvas;
+/** 左鍵按下的位置（框選用）；右鍵按下的位置（分辨「點一下下指令」和「拖曳平移」） */
+let boxStart: { x: number; y: number } | null = null;
+let rightDown: { x: number; y: number } | null = null;
+let lastClick = { t: 0, unit: -1 };
+
 canvas.addEventListener('pointermove', (e) => {
   mouse = { x: e.clientX, y: e.clientY, in: true };
+  if (boxStart) {
+    const l = Math.min(boxStart.x, e.clientX), t = Math.min(boxStart.y, e.clientY);
+    const w = Math.abs(e.clientX - boxStart.x), h = Math.abs(e.clientY - boxStart.y);
+    const show = w > 5 || h > 5;
+    dragBox.style.display = show ? 'block' : 'none';
+    if (show) Object.assign(dragBox.style, { left: `${l}px`, top: `${t}px`, width: `${w}px`, height: `${h}px` });
+  }
   if (held) act(false);
 });
 canvas.addEventListener('pointerleave', () => { mouse.in = false; });
 canvas.addEventListener('pointerdown', (e) => {
+  if (e.button === 2) { rightDown = { x: e.clientX, y: e.clientY }; return; }
   if (e.button !== 0) return;
+  if (army.mode) { army.modeClick(e.clientX, e.clientY, e.shiftKey); return; }
+  if (tool === 'select') { boxStart = { x: e.clientX, y: e.clientY }; return; }
   held = true;
   lastPaintTile = -1;
   act(true);
 });
-addEventListener('pointerup', (e) => { if (e.button === 0) held = false; });
+addEventListener('pointerup', (e) => {
+  if (e.button === 2 && rightDown) {
+    const moved = Math.hypot(e.clientX - rightDown.x, e.clientY - rightDown.y);
+    rightDown = null;
+    if (moved < 6 && e.target === canvas) rightClick(e.clientX, e.clientY, e.shiftKey);
+    return;
+  }
+  if (e.button !== 0) return;
+  held = false;
+  if (boxStart) {
+    const start = boxStart;
+    boxStart = null;
+    dragBox.style.display = 'none';
+    if (Math.abs(e.clientX - start.x) > 5 || Math.abs(e.clientY - start.y) > 5) {
+      army.boxSelect(start.x, start.y, e.clientX, e.clientY, e.shiftKey);
+      if (army.sel.length) renderer.selected = null;
+    } else clickSelect(e.clientX, e.clientY, e.shiftKey, e.ctrlKey);
+    hud.update(); // 選取一換，下方資訊列馬上更新
+  }
+});
+
+/** 左鍵點一下：單位 → 選單位（雙擊或 Ctrl 選同兵種）；不然選建築 */
+function clickSelect(cx: number, cy: number, shift: boolean, ctrl: boolean): void {
+  const i = army.pickUnit(cx, cy);
+  const u = world.units;
+  if (i >= 0 && u.team[i] === 0) {
+    const now = performance.now();
+    const dbl = lastClick.unit === i && now - lastClick.t < 350;
+    lastClick = { t: now, unit: i };
+    if (dbl || ctrl) army.selectSameKind(i, shift);
+    else if (shift && army.sel.includes(i)) army.setSelection(army.sel.filter((j) => j !== i), false); // Shift 再點一次 = 取消
+    else army.setSelection([i], shift);
+    renderer.selected = null;
+    return;
+  }
+  if (i >= 0) { army.setInspect(i); renderer.selected = null; return; } // 敵人：只看資訊
+  if (shift) return;
+  army.setSelection([], false);
+  const h = hoverTile(1);
+  renderer.selected = h ? world.buildingAtTile(h.tx, h.ty) ?? null : null;
+}
+
+/** 右鍵點一下：部隊 → 移動／攻擊；兵營 → 設集結點 */
+function rightClick(cx: number, cy: number, shift: boolean): void {
+  if (tool !== 'select') { setTool('select'); return; } // 右鍵取消建造
+  if (army.rightClick(cx, cy, shift)) return;
+  const b = renderer.selected;
+  const p = renderer.cam.pick(cx, cy);
+  if (b && b.kind === BK.Barracks && p && !world.isSolid(Math.floor(p.x), Math.floor(p.z))) world.setRally(b, p.x, p.z);
+}
 
 function hoverTile(size: number): { tx: number; ty: number; x: number; y: number } | null {
   const p = renderer.cam.pick(mouse.x, mouse.y);
@@ -190,17 +364,12 @@ function act(first: boolean): void {
     if (key === lastPaintTile) return;
     lastPaintTile = key;
     const b = world.tryPlace(t.building, h.tx, h.ty);
-    if (b && t.building !== BK.Wall) { renderer.selected = b; }
+    if (b && t.building !== BK.Wall) { renderer.selected = b; army.setSelection([], false); }
     return;
   }
   const h = hoverTile(1);
   if (!h) return;
   switch (tool) {
-    case 'select': {
-      if (!first) return;
-      renderer.selected = world.buildingAtTile(h.tx, h.ty) ?? null;
-      break;
-    }
     case 'erase': {
       const b = world.buildingAtTile(h.tx, h.ty);
       if (b) { world.removeBuilding(b, true); if (renderer.selected === b) renderer.selected = null; }
@@ -226,6 +395,7 @@ function act(first: boolean): void {
 }
 
 function updateGhost(): void {
+  canvas.style.cursor = army.mode ? 'crosshair' : '';
   const t = TOOLS.find((o) => o.id === tool)!;
   if (t.building === undefined || !mouse.in) { renderer.setGhost(false); return; }
   const k = BUILDING_KINDS[t.building];
@@ -238,20 +408,41 @@ function updateGhost(): void {
 addEventListener('keydown', (e) => {
   if (isTyping(e)) return;
   const k = e.key.toLowerCase();
+  // 暫停選單開著：只有 ESC 有用（關掉選單）
+  if (pauseOpen()) { if (k === 'escape') setPauseMenu(false); return; }
+  // 編隊：用 e.code，Shift+數字 時 e.key 會變成符號
+  const digit = /^Digit(\d)$/.exec(e.code);
+  if (digit) {
+    e.preventDefault();
+    army.groupKey(Number(digit[1]), e.ctrlKey || e.metaKey, e.shiftKey);
+    if (army.sel.length) renderer.selected = null;
+    return;
+  }
+  if ((e.ctrlKey || e.metaKey) && k === 'a') { e.preventDefault(); army.selectAll(); renderer.selected = null; return; }
+  if (e.ctrlKey || e.metaKey || e.altKey) return;
+  // 部隊指令（有選部隊時）
+  if (army.sel.length) {
+    if (k === 'a') { army.mode = 'attackMove'; setTool('select'); return; }
+    if (k === 'r') { army.mode = 'patrol'; setTool('select'); return; }
+    if (k === 's') { army.command('stop'); return; }
+    if (k === 'h') { army.command('hold'); return; }
+  }
   const t = TOOLS.find((o) => o.key.toLowerCase() === k);
-  if (t) { setTool(t.id); return; }
-  if (k === 'escape') { setTool('select'); renderer.selected = null; }
+  if (t) { setTool(t.id); if (t.id !== 'select') { funcBar.open = 'build'; funcBar.update(); } return; } // 按建造快捷鍵：功能表跟著打開「建造」
+  if (k === 'escape') {
+    // ESC：先取消「等待點地面的指令」或建造工具；沒有可以取消的就打開暫停選單
+    if (army.mode) { army.mode = null; return; }
+    if (tool !== 'select') { setTool('select'); return; }
+    if (army.sel.length || army.inspect >= 0 || renderer.selected) { army.setSelection([], false); renderer.selected = null; return; }
+    if (started && !world.gameOver && !world.victory) setPauseMenu(true);
+  }
   else if (k === ' ') { e.preventDefault(); if (started) world.spawnWave(); }
   else if (k === 'p') loop.paused = !loop.paused;
   else if (k === 'f') renderer.showFlow = !renderer.showFlow;
-  else if (k === 'u' && renderer.selected) world.upgrade(renderer.selected);
+  else if (k === 'u' && renderer.selected) { world.upgrade(renderer.selected); hud.invalidate(); }
   else if (k === 'delete' && renderer.selected) { world.removeBuilding(renderer.selected, true); renderer.selected = null; }
 });
 
-// ---------------------------------------------------------------- 選取面板（按鈕固定、只更新文字）
-$('selUp').onclick = () => { if (renderer.selected) world.upgrade(renderer.selected); };
-$('selSell').onclick = () => { if (renderer.selected) { world.removeBuilding(renderer.selected, true); renderer.selected = null; } };
-$('selRally').onclick = () => setTool('rally');
 $('overBtn').onclick = () => newWorld();
 
 function updatePanels(): void {
@@ -267,35 +458,12 @@ function updatePanels(): void {
     `FPS ${s.fps}  模擬 ${s.simMs.toFixed(2)}ms  繪圖 ${s.renderMs.toFixed(2)}ms\n` +
     `單位 ${world.units.count}  待生成 ${world.pendingSpawns}  ${renderer.drawStats()}\n` +
     `速度 x${loop.timeScale}${loop.paused ? '（暫停）' : ''}  種子 ${world.seed}`;
-
-  for (const t of TOOLS) {
-    if (t.building !== undefined) $('tool_' + t.id).classList.toggle('poor', !world.canAfford(BUILDING_KINDS[t.building].cost));
-  }
-
-  const b = renderer.selected;
-  const panel = $('selPanel');
-  if (!b || b.dead) { panel.style.display = 'none'; return; }
-  panel.style.display = 'block';
-  const k = BUILDING_KINDS[b.kind];
-  let stats = `耐久 ${Math.ceil(b.hp)} / ${b.maxHp}`;
-  if (b.kind === BK.Tower) stats += `<br>傷害 ${world.towerDamage(b).toFixed(0)}　射程 ${world.towerRange(b).toFixed(1)}`;
-  if (b.kind === BK.Barracks) stats += `<br>綿羊 ${b.units} / ${world.barracksCap(b)}`;
-  $('selInfo').innerHTML = `<b>${k.icon} ${k.name}</b>　Lv.${b.level}<br>${stats}`;
-  const cost = world.upgradeCost(b);
-  const up = $('selUp') as HTMLButtonElement;
-  up.style.display = b.kind === BK.Base ? 'none' : '';
-  up.textContent = cost === null ? '已滿級' : `升級 💰${cost} (U)`;
-  up.disabled = cost === null || !world.canAfford(cost);
-  const sell = $('selSell') as HTMLButtonElement;
-  sell.style.display = b.kind === BK.Base ? 'none' : '';
-  sell.textContent = `拆除 +${Math.floor(b.invested * 0.5)} (Del)`;
-  const rally = $('selRally') as HTMLButtonElement;
-  rally.style.display = b.kind === BK.Barracks ? '' : 'none';
-  rally.classList.toggle('on', tool === 'rally');
+  hud.update();
+  funcBar.update();
 }
 setInterval(updatePanels, 200);
 
 loop.start();
 
 // 方便在瀏覽器 console 除錯：window.game.world
-(window as unknown as { game: unknown }).game = { get world() { return world; }, loop, renderer };
+(window as unknown as { game: unknown }).game = { get world() { return world; }, loop, renderer, army };
