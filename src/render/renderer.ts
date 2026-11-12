@@ -2,6 +2,8 @@ import * as THREE from 'three';
 import { BK, BUILDING_KINDS, UNIT_KINDS } from '../sim/data';
 import { Tile } from '../sim/map';
 import type { Building, World } from '../sim/world';
+import { ArtLibrary } from './art/library';
+import type { ArtSlot } from './art/manifest';
 import { RtsCamera } from './camera';
 import { buildingMesh, treeGeometry, unitGeometry } from './models';
 import { makeKnitTexture, WoolMaterials } from './wool';
@@ -22,6 +24,8 @@ export class GameRenderer {
   readonly scene = new THREE.Scene();
   readonly cam: RtsCamera;
   readonly mats: WoolMaterials;
+  /** GPT 圖片 → 3D 模型（public/art/） */
+  readonly art: ArtLibrary;
   showFlow = false;
   selected: Building | null = null;
 
@@ -29,6 +33,11 @@ export class GameRenderer {
   private mapGroup = new THREE.Group();
   private unitMeshes: THREE.InstancedMesh[] = [];
   private kindColors: THREE.Color[] = [];
+  private unitProc: { geo: THREE.BufferGeometry; mat: THREE.Material }[] = [];
+  private unitArt: boolean[] = [];
+  private treeMesh: THREE.InstancedMesh | null = null;
+  private treeTiles: number[] = [];
+  private procTreeGeo = treeGeometry();
   private counts: Int32Array;
   private buildingObjs = new Map<number, { obj: THREE.Group; level: number; bar: THREE.Mesh }>();
   private bVersion = -1;
@@ -77,7 +86,10 @@ export class GameRenderer {
     for (const k of UNIT_KINDS) {
       let geo = geoCache.get(k.model);
       if (!geo) { geo = unitGeometry(k.model); geoCache.set(k.model, geo); }
-      const mesh = new THREE.InstancedMesh(geo, this.mats.get(0xffffff, { vertexColors: true }), unitCap);
+      const mat = this.mats.get(0xffffff, { vertexColors: true });
+      this.unitProc.push({ geo, mat });
+      this.unitArt.push(false);
+      const mesh = new THREE.InstancedMesh(geo, mat, unitCap);
       mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
       mesh.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(unitCap * 3), 3);
       mesh.instanceColor.setUsage(THREE.DynamicDrawUsage);
@@ -122,6 +134,51 @@ export class GameRenderer {
 
     addEventListener('resize', () => this.resize());
     this.resize();
+
+    this.procTreeGeo.userData.keep = true;
+    this.art = new ArtLibrary(this.mats.knit.image as HTMLCanvasElement);
+    this.art.onChange((slot) => this.applyArt(slot));
+    void this.art.loadAll();
+  }
+
+  // ---------------------------------------------------------------- 圖片模型
+  /** 某個美術插槽的模型變了（載入、重新載入、調參數）→ 換掉畫面上對應的東西 */
+  private applyArt(slot: ArtSlot): void {
+    const t = slot.target;
+    if (t.type === 'unit') {
+      const k = t.kind, mesh = this.unitMeshes[k];
+      if (!mesh) return;
+      const art = this.art.get(slot.id);
+      mesh.geometry = art ? art.geometry : this.unitProc[k].geo;
+      mesh.material = art ? art.material : this.unitProc[k].mat;
+      mesh.customDepthMaterial = art ? art.depthMaterial : undefined;
+      this.unitArt[k] = !!art;
+      this.kindColors[k].setHex(art ? 0xffffff : UNIT_KINDS[k].color);
+    } else if (t.type === 'building') {
+      if (!this.world) return;
+      for (const v of this.buildingObjs.values()) this.scene.remove(v.obj);
+      this.buildingObjs.clear();
+      this.bVersion = -1;
+    } else {
+      this.applyTreeArt();
+    }
+  }
+
+  private applyTreeArt(): void {
+    const mesh = this.treeMesh;
+    if (!mesh) return;
+    const art = this.art.get('tree');
+    mesh.geometry = art ? art.geometry : this.procTreeGeo;
+    mesh.material = art ? art.material : this.mats.get(0xffffff, { vertexColors: true });
+    mesh.customDepthMaterial = art ? art.depthMaterial : undefined;
+    const hash = (i: number) => { const x = Math.sin(i * 12.9898) * 43758.5453; return x - Math.floor(x); };
+    this.treeTiles.forEach((i, n) => {
+      const r = hash(i);
+      // 圖片模型：只做明暗變化，保留原圖顏色
+      if (art) mesh.setColorAt(n, this.tmpC.setScalar(0.85 + r * 0.15));
+      else mesh.setColorAt(n, this.tmpC.setHSL(0.25 + r * 0.08, 0.35, 0.75 + r * 0.25));
+    });
+    if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
   }
 
   get canvas(): HTMLCanvasElement {
@@ -147,7 +204,10 @@ export class GameRenderer {
     this.world = world;
     for (const c of [...this.mapGroup.children]) {
       this.mapGroup.remove(c);
-      c.traverse((o) => { if ((o as THREE.Mesh).geometry) (o as THREE.Mesh).geometry.dispose(); });
+      c.traverse((o) => {
+        const g = (o as THREE.Mesh).geometry;
+        if (g && !g.userData.art && !g.userData.keep) g.dispose(); // 圖片模型和共用幾何不在這裡釋放
+      });
     }
     for (const { obj } of this.buildingObjs.values()) this.scene.remove(obj);
     this.buildingObjs.clear();
@@ -179,7 +239,7 @@ export class GameRenderer {
       else if (map.tiles[i] === Tile.Tree) trees.push(i);
     }
     const rockMesh = new THREE.InstancedMesh(new THREE.IcosahedronGeometry(0.55, 0), this.mats.get(0xa59d92, { flat: true }), Math.max(1, rocks.length));
-    const treeMesh = new THREE.InstancedMesh(treeGeometry(), this.mats.get(0xffffff, { vertexColors: true }), Math.max(1, trees.length));
+    const treeMesh = new THREE.InstancedMesh(this.procTreeGeo, this.mats.get(0xffffff, { vertexColors: true }), Math.max(1, trees.length));
     const q = new THREE.Quaternion(), s = new THREE.Vector3(), p = new THREE.Vector3(), up = new THREE.Vector3(0, 1, 0);
     const hash = (i: number) => { const x = Math.sin(i * 12.9898) * 43758.5453; return x - Math.floor(x); };
     rocks.forEach((i, n) => {
@@ -196,11 +256,13 @@ export class GameRenderer {
       s.set(sc, sc, sc);
       p.set(x + 0.5 + (hash(i + 1) - 0.5) * 0.3, 0, y + 0.5 + (hash(i + 2) - 0.5) * 0.3);
       treeMesh.setMatrixAt(n, this.tmpM.compose(p, q, s));
-      treeMesh.setColorAt(n, this.tmpC.setHSL(0.25 + r * 0.08, 0.35, 0.75 + r * 0.25));
     });
     rockMesh.count = rocks.length;
     treeMesh.count = trees.length;
     for (const m of [rockMesh, treeMesh]) { m.castShadow = true; m.receiveShadow = true; this.mapGroup.add(m); }
+    this.treeMesh = treeMesh;
+    this.treeTiles = trees;
+    this.applyTreeArt();
 
     this.cam.bounds = { w: map.w, h: map.h };
     this.cam.target.set(map.baseX + 1.5, 0, map.baseY + 1.5);
@@ -281,10 +343,11 @@ export class GameRenderer {
       const cur = this.buildingObjs.get(b.id);
       if (cur && cur.level === b.level) continue;
       if (cur) this.scene.remove(cur.obj);
-      const obj = buildingMesh(b.kind, b.level, BUILDING_KINDS[b.kind].color, this.mats);
+      const obj = buildingMesh(b.kind, b.level, BUILDING_KINDS[b.kind].color, this.mats, this.art.forBuilding(b.kind));
       obj.position.set(b.tx + b.size / 2, 0, b.ty + b.size / 2);
+      const top = new THREE.Box3().setFromObject(obj).max.y; // 血條放在模型頂端上方（圖片模型高度不固定）
       const bar = new THREE.Mesh(new THREE.BoxGeometry(1, 0.1, 0.12), new THREE.MeshBasicMaterial({ color: 0x5ad35a }));
-      bar.position.y = b.kind === BK.Base ? 4.1 : b.kind === BK.Wall ? 1.3 : 2.4;
+      bar.position.y = Math.max(top + 0.35, b.kind === BK.Wall ? 1.3 : 1.8);
       bar.visible = false;
       obj.add(bar);
       this.scene.add(obj);
@@ -325,7 +388,7 @@ export class GameRenderer {
       m.setPosition(x, bob, y);
       mesh.setMatrixAt(n, m);
       const c = this.kindColors[k];
-      if (u.hitT[i] > 0) mesh.setColorAt(n, this.tmpC.copy(c).lerp(this.white, 0.7));
+      if (u.hitT[i] > 0) mesh.setColorAt(n, this.unitArt[k] ? this.tmpC.setRGB(1, 0.5, 0.5) : this.tmpC.copy(c).lerp(this.white, 0.7));
       else mesh.setColorAt(n, c);
     }
     for (let k = 0; k < this.unitMeshes.length; k++) {

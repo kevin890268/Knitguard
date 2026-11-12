@@ -22,14 +22,15 @@
   - `world.ts` — 遊戲規則、AI、波次、建築、碰撞
 - `src/render/` — 只讀 World 狀態；單位用 InstancedMesh（每種一個 draw call）
   - `wool.ts` — 程式產生的針織貼圖與材質快取
-  - `models.ts` — 單位/建築/樹的模型
+  - `models.ts` — 單位/建築/樹的模型（程式產生；有圖片時改用圖片模型）
+  - `art/` — **外部美術**：每個插槽依序找 `public/models/<id>.glb` → `public/art/<id>.png` → 程式模型。`manifest.ts` 列出插槽，`glb.ts` 把 .glb 攤平成一個幾何（每種材質一個 group，仍是 InstancedMesh），`imageTo3d.ts` 把圖片充氣成布偶，`library.ts` 讀檔與熱重載。流程見 `docs/art-pipeline.md`
 - `src/debug/devPanel.ts` — 沙盒面板（種子、時間倍率、單步、生成屍潮、免費建造、流場顯示）
 - `window.game` — 瀏覽器 console 可存取 world/loop/renderer
 - `prototype/` — 最早的 2D 單檔原型，僅供參考
 
 ## 慣例
 
-- 新增單位或建築種類：先在 `data.ts` 加資料，模型加在 `models.ts`
+- 新增單位或建築種類：先在 `data.ts` 加資料，模型加在 `models.ts`，再到 `render/art/manifest.ts` 加美術插槽
 - 遊戲邏輯一律寫在 sim 層，render 層不改遊戲狀態
 - 效能目標：數千單位維持順暢；避免在每 tick 熱迴圈裡配置物件
 - 內建瀏覽器面板的 rAF 上限約 30 FPS，測 FPS 要用一般瀏覽器
