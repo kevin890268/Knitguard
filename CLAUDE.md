@@ -6,7 +6,7 @@
 - 使用者希望規則簡單、不要太細節
 
 - 參考作品：They Are Billions（大量屍潮、拆牆）、要戰便戰、Wool at the Gates（毛線/針織手工風）
-- 技術：TypeScript + Vite + Three.js，開發者面板用 lil-gui
+- 技術：TypeScript + Vite；畫面預設是 Canvas 2D 斜角（Three.js 只用來把 3D 模型拍成圖，`?3d` 時才是完整 3D），開發者面板用 lil-gui
 - 執行：`npm run dev`，開啟 http://localhost:5173（`.claude/launch.json` 的 `game` 設定）
 - 檢查：`npm run typecheck`
 - Node 裝在 `C:\Program Files\nodejs`（舊的 shell 可能還沒有 PATH）
@@ -20,7 +20,12 @@
   - `spatialHash.ts` — 每 tick 重建的網格，碰撞/索敵都用它
   - `flowfield.ts` — 從城堡出發的 Dijkstra 流場，所有敵人共用；建築格成本高 → 會拆牆
   - `world.ts` — 遊戲規則、AI、波次、建築、碰撞
-- `src/render/` — 只讀 World 狀態；單位用 InstancedMesh（每種一個 draw call）
+- `src/render2d/` — **預設的 2D 斜角繪圖**（Canvas 2D，方格地圖畫成菱形；網址加 `?3d` 改用 3D 版）
+  - `iso.ts` — 斜角投影（世界 ↔ 螢幕）與 2D 鏡頭
+  - `sprites2d.ts` — 直接用 Canvas 畫的建築、毛球怪、樹、石頭；`spritesFromViews` 把設定圖的 5 個角度變成 8 方向圖（`public/sprites/<插槽名>/`，羊人用這個）
+  - `spriteBaker.ts` — 把 3D 模型拍成 8 方向的圖（羊人 `.glb`、有美術檔的插槽用這個）
+  - `renderer2d.ts` — 地面分塊快取、依 x+y 排序畫圖、介面和 3D 版相同（`cam.pick`、`setGhost`、`selected`…）
+- `src/render/` — 3D 版（只讀 World 狀態；單位用 InstancedMesh，每種一個 draw call）
   - `wool.ts` — 程式產生的針織貼圖與材質快取
   - `models.ts` — 單位/建築/樹的模型（程式產生；有圖片時改用圖片模型）
   - `art/` — **外部美術**：每個插槽依序找 `public/models/<id>.glb` → `public/art/<id>.png` → 程式模型。`manifest.ts` 列出插槽，`glb.ts` 把 .glb 攤平成一個幾何（每種材質一個 group，仍是 InstancedMesh），`imageTo3d.ts` 把圖片充氣成布偶，`library.ts` 讀檔與熱重載。流程見 `docs/art-pipeline.md`

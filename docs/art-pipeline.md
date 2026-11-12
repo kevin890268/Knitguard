@@ -1,5 +1,29 @@
 # 美術流程：3D 模型與圖片
 
+## 2D 版（預設）：單位用設定圖的多視角
+
+2D 斜角版的單位最優先用**畫好的設定圖**：把同一隻角色的 5 個角度放進 `public/sprites/<名字>/`
+
+| 檔名 | 角度 | 用在畫面上的哪個朝向 |
+|---|---|---|
+| `front.png` | 正面（必要） | 正對鏡頭 |
+| `front45.png` | 右前 45°（臉朝右） | 右下；鏡像後當左下 |
+| `side.png` | 右側（臉朝右） | 右；鏡像後當左 |
+| `back45.png` | 右後 45° | 右上；鏡像後當左上 |
+| `back.png` | 背面 | 背對鏡頭 |
+| `frontLeft45.png` | 左前 45°（選用） | 左下（沒有就鏡像 front45） |
+| `backLeft45.png` | 左後 45°（選用） | 左上（沒有就鏡像 back45） |
+
+- **最好是 45 度俯角畫的設定圖**（和遊戲鏡頭同角度），平視的圖放進斜角地圖會有點怪
+- 沒有 `side.png` 時：往右走用 front45、往左走用 frontLeft45；其他缺的角度用正面代替
+- 背景會自動去掉（容差用 manifest 的 `bgTolerance`）
+- 高度依 manifest 的 `height` × 單位大小縮放，所有角度用同一個比例
+- **背景用和角色差很多的純色、不要畫地面陰影**：米白羊毛放在米色背景上，去背會吃掉頭頂；灰綠色背景就很乾淨
+- 羊人目前用 `Low-Poly Chibi Sheep Turnaround Sheet2`（45 度俯角、灰綠背景）裁出的 5 張（`art-src/sheep-topdown2/`）；米色背景版在 `art-src/sheep-topdown/`，平視版在 `art-src/sheep/`
+- 沒有這組圖時，才用下面的 `.glb` 拍成 8 方向；都沒有就用程式畫的 2D 圖
+
+---
+
 每個美術插槽（單位、建築、樹）依序找：
 
 1. **`public/models/<名字>.glb`**：真正的 3D 模型（Blender 手工做，或 AI 圖片轉 3D 工具做）← 主角種族用這個
@@ -27,6 +51,21 @@
 | 骨架、動畫 | 不需要；有也會被忽略（用綁定姿勢） | 單位用 instancing，不跑骨架 |
 | 材質 | 越少越好（理想是 1 張貼圖） | **每種材質多 1 個 draw call** |
 | 匯出 | File → Export → glTF 2.0，格式選 **glTF Binary (.glb)**，**關掉 Compression（Draco）** | 遊戲目前不支援 Draco 壓縮 |
+
+### 專案裡的模型工具（tools/，用 Node 執行，不需要 Blender）
+
+| 情況 | 指令 |
+|---|---|
+| AI 模型**沒有貼圖**（只有形狀） | `node tools/views-to-glb.mjs art-src/sheep public/models/sheep.glb --mesh=<模型.glb>`：用 `art-src/sheep/` 裡的各角度圖投影上色 |
+| （上一行的細節） | 預設輸出「投影貼圖」：每個面從看得到它、又最正對它的角度取原圖，五官會依模型的臉重新畫（位置不對用 `--nose-y=0.65` 指定，`--no-face` 關掉）；法線平滑、顏色往奶油色柔化（`--soften=0.12`）。要舊版的頂點色用 `--vertex-colors`，要稜角分明用 `--flat` |
+| 某個部位太大（例如尾巴） | 同上再加 `--shrink-back=y0,y1,z0,k[,度數]`：高度 y0–y1、凸出到 z0 後面的部分縮成 k 倍，再往下轉幾度（垂下來）；模型高度當 1 |
+| 變形後顏色不對 | 再加 `--back-color=#rrggbb`：變形的部位直接用這個顏色 |
+| AI 把**整張設定表**做成一個模型 | `node tools/glb-extract.mjs <模型.glb> --list` 看有哪些塊，再用 `--box=x0,x1,y0,y1 --target=4000` 切出一隻並減面 |
+
+羊人目前的做法：Tripo 低面數模型（2996 面、無貼圖）+ 設定表上色 + 尾巴縮成 0.45 倍、往下垂 70 度、米白色：
+```
+node tools/views-to-glb.mjs art-src/sheep public/models/sheep.glb "--mesh=low-poly ram 3d model.glb" --shrink-back=0.13,0.45,0.0,0.45,70 --back-color=#f1e4cf
+```
 
 ### 支援的內容
 - 多個網格、多種材質、巢狀變換：會自動攤平成一個模型
@@ -67,7 +106,9 @@
 | `tree.png` | 樹 | 正面 |
 
 - 支援 `.png`、`.webp`
-- **第二張剪影**（選用）：主圖是正面 → 加 `<名字>_side.png`（側面、面向右）；主圖是側面 → 加 `<名字>_front.png`
+- **第二張剪影**（選用）：主圖是正面 → 加 `<名字>_side.png`（側面、面向右）；主圖是側面 → 加 `<名字>_front.png`。厚度照這張的輪廓做，側面就不會是薄片
+- **背面圖**（選用）：`<名字>_back.png`。顏色用這張，輪廓沿用正面；沒有的話背面是正面的鏡像（後腦會看到臉）
+- 有「三視圖設定表」時，直接把正面、右側、背面各裁一張就好（羊人就是這樣做的：`sheep.png`、`sheep_side.png`、`sheep_back.png`）
 - 換圖後，在開發者面板「🎨 美術」按 **🔄 重新載入圖片**，不用重新整理
 - 插槽清單和預設參數在 [src/render/art/manifest.ts](../src/render/art/manifest.ts)；新增單位或建築時在這裡加一行
 

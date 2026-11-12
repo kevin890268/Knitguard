@@ -75,17 +75,37 @@ function removeBackground(d: Uint8ClampedArray, W: number, H: number, tol: numbe
     return Math.sqrt(dr * dr + dg * dg + db * db);
   };
 
+  // 擴散規則：
+  //   1. 和底色差不超過 tol × 2（容許背景漸層和淡淡的地面陰影）
+  //   2. 和「旁邊那個背景像素」的色差很小（≤ step）
+  // 背景和陰影都是平滑漸層，可以一路擴散；角色邊緣就算顏色接近（例如米白羊毛），也會有一點落差而擋住
+  const step = Math.max(2, tol / 10);
+  // 地面陰影：和底色同色調、只是比較暗（各色版比例一致），而且在圖的下半部
+  const shadowLike = (j: number) => {
+    if (((j / W) | 0) < H * 0.6) return false;
+    const o = j * 4, rr = d[o] / Math.max(1, br), rg = d[o + 1] / Math.max(1, bg), rb = d[o + 2] / Math.max(1, bb);
+    const m = (rr + rg + rb) / 3;
+    return m > 0.5 && m < 1.02 && Math.abs(rr - m) < 0.035 && Math.abs(rg - m) < 0.035 && Math.abs(rb - m) < 0.035;
+  };
+  const stepDist = (i: number, j: number) => {
+    const a = i * 4, b = j * 4;
+    return Math.abs(d[a] - d[b]) + Math.abs(d[a + 1] - d[b + 1]) + Math.abs(d[a + 2] - d[b + 2]);
+  };
   const isBg = new Uint8Array(W * H);
   const stack: number[] = [];
-  const seed = (i: number) => { if (!isBg[i] && dist(i) <= tol) { isBg[i] = 1; stack.push(i); } };
-  for (let x = 0; x < W; x++) { seed(x); seed((H - 1) * W + x); }
-  for (let y = 0; y < H; y++) { seed(y * W); seed(y * W + W - 1); }
+  for (let x = 0; x < W; x++) for (const i of [x, (H - 1) * W + x]) if (!isBg[i] && dist(i) <= tol) { isBg[i] = 1; stack.push(i); }
+  for (let y = 0; y < H; y++) for (const i of [y * W, y * W + W - 1]) if (!isBg[i] && dist(i) <= tol) { isBg[i] = 1; stack.push(i); }
+  const grow = (from: number, j: number) => {
+    if (isBg[j]) return;
+    const sd = stepDist(from, j);
+    if ((dist(j) <= tol * 2 && sd <= step) || (sd <= step * 2.5 && shadowLike(j))) { isBg[j] = 1; stack.push(j); }
+  };
   while (stack.length) {
     const i = stack.pop()!, x = i % W, y = (i / W) | 0;
-    if (x > 0) seed(i - 1);
-    if (x < W - 1) seed(i + 1);
-    if (y > 0) seed(i - W);
-    if (y < H - 1) seed(i + W);
+    if (x > 0) grow(i, i - 1);
+    if (x < W - 1) grow(i, i + 1);
+    if (y > 0) grow(i, i - W);
+    if (y < H - 1) grow(i, i + W);
   }
   for (let i = 0; i < W * H; i++) {
     if (isBg[i]) { d[i * 4 + 3] = 0; continue; }
@@ -158,12 +178,12 @@ function bleedColors(d: Uint8ClampedArray, W: number, H: number, passes: number)
 
 // ---------------------------------------------------------------- 3. 距離場
 /** 兩趟 chamfer 距離轉換：每個在剪影內的像素到最近外部像素的距離（像素）。 */
-function distanceField(c: Cutout): Float32Array {
+function distanceField(c: Cutout, oob = 0): Float32Array {
   const { w: W, h: H, rgba } = c;
   const INF = 1e9, a = 1, b = Math.SQRT2;
   const f = new Float32Array(W * H);
   for (let i = 0; i < W * H; i++) f[i] = rgba[i * 4 + 3] >= 128 ? INF : 0;
-  const get = (x: number, y: number) => (x < 0 || y < 0 || x >= W || y >= H ? 0 : f[y * W + x]);
+  const get = (x: number, y: number) => (x < 0 || y < 0 || x >= W || y >= H ? oob : f[y * W + x]);
   for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
     const i = y * W + x;
     if (!f[i]) continue;
@@ -175,6 +195,29 @@ function distanceField(c: Cutout): Float32Array {
     f[i] = Math.min(f[i], get(x + 1, y) + a, get(x, y + 1) + a, get(x + 1, y + 1) + b, get(x - 1, y + 1) + b);
   }
   return f;
+}
+
+/** 剪影外的像素到剪影的距離（和 distanceField 相反），用來把外圈頂點貼到輪廓上。 */
+function outsideField(c: Cutout): Float32Array {
+  const inv: Cutout = { w: c.w, h: c.h, rgba: new Uint8ClampedArray(c.rgba.length) };
+  for (let i = 3; i < c.rgba.length; i += 4) inv.rgba[i] = c.rgba[i] >= 128 ? 0 : 255;
+  return distanceField(inv, 1e9); // 影像邊界外也是剪影外，不能當成距離的起點
+}
+
+/**
+ * 外圈頂點：沿距離場的梯度往內移到輪廓上，再多進去一點點（inset 像素），
+ * 確保取到的貼圖是不透明的 → 側牆不會被 alpha 測試切出縫。回傳新的像素座標。
+ */
+const CONTOUR_INSET = 2.5;
+function snapToContour(out: Float32Array, W: number, H: number, px: number, py: number, maxD: number): [number, number] {
+  const d = sampleBilinear(out, W, H, px, py);
+  if (d <= 0 || d > maxD) return [px, py];
+  const gx = sampleBilinear(out, W, H, px + 1, py) - sampleBilinear(out, W, H, px - 1, py);
+  const gy = sampleBilinear(out, W, H, px, py + 1) - sampleBilinear(out, W, H, px, py - 1);
+  const len = Math.hypot(gx, gy);
+  if (len < 1e-4) return [px, py];
+  const step = d + CONTOUR_INSET;
+  return [px - (gx / len) * step, py - (gy / len) * step];
 }
 
 function sampleBilinear(f: Float32Array, W: number, H: number, px: number, py: number): number {
@@ -213,6 +256,53 @@ function rowProfile(c: Cutout, worldH: number, rows: number): RowProfile {
     center[r] = sc / n;
   }
   return { half, center };
+}
+
+// ---------------------------------------------------------------- 背面圖
+/**
+ * 把正面和背面拼成一張貼圖（左半正面、右半背面）。
+ * 背面圖縮放到和正面同大小並左右翻轉（從背後看，角色的左手在畫面左邊），
+ * 顏色用背面圖，輪廓（alpha）一律用正面的 → 兩面外形一定一致，不會破洞。
+ */
+export function combineFrontBack(front: Cutout, back: Cutout): Cutout {
+  const { w: W, h: H } = front;
+  const out = new Uint8ClampedArray(W * 2 * H * 4);
+  const filled = new Uint8Array(W * H);
+  for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+    const fo = (y * W + x) * 4, oo = (y * W * 2 + x) * 4, bo = oo + W * 4;
+    for (let k = 0; k < 4; k++) out[oo + k] = front.rgba[fo + k];
+    const bx = Math.min(back.w - 1, Math.floor(((W - 1 - x) / W) * back.w));
+    const by = Math.min(back.h - 1, Math.floor((y / H) * back.h));
+    const so = (by * back.w + bx) * 4;
+    out[bo] = back.rgba[so]; out[bo + 1] = back.rgba[so + 1]; out[bo + 2] = back.rgba[so + 2];
+    out[bo + 3] = front.rgba[fo + 3];
+    if (back.rgba[so + 3] >= 128) filled[y * W + x] = 1;
+  }
+  // 背面圖沒蓋到、但正面輪廓有的地方：用附近的背面顏色補上
+  let todo = filled;
+  for (let pass = 0; pass < 40; pass++) {
+    const next = todo.slice();
+    let changed = false;
+    for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+      const i = y * W + x;
+      if (todo[i]) continue;
+      let r = 0, g = 0, b = 0, n = 0;
+      for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+        const nx = x + dx, ny = y + dy;
+        if (nx < 0 || ny < 0 || nx >= W || ny >= H || !todo[ny * W + nx]) continue;
+        const o = (ny * W * 2 + nx + W) * 4;
+        r += out[o]; g += out[o + 1]; b += out[o + 2]; n++;
+      }
+      if (n) {
+        const o = (y * W * 2 + x + W) * 4;
+        out[o] = r / n; out[o + 1] = g / n; out[o + 2] = b / n;
+        next[i] = 1; changed = true;
+      }
+    }
+    todo = next;
+    if (!changed) break;
+  }
+  return { w: W * 2, h: H, rgba: out };
 }
 
 // ---------------------------------------------------------------- 貼圖（疊上針織紋理）
@@ -258,12 +348,14 @@ export interface InflateResult {
 
 /**
  * main：主要那張圖；depthImg：另一個角度的剪影（可為 null）。
+ * atlas：貼圖是 combineFrontBack 拼出來的（左半正面、右半背面）。
  * 模型原點在腳底中心；front 圖面向 +Z，side 圖（角色面向右）的前進方向是 +Z。
  */
-export function inflate(main: Cutout, depthImg: Cutout | null, slot: ArtSlot): InflateResult {
+export function inflate(main: Cutout, depthImg: Cutout | null, slot: ArtSlot, atlas = false): InflateResult {
   const { w: W, h: H, rgba } = main;
   const worldH = slot.height, worldW = worldH * (W / H);
   const df = distanceField(main);
+  const outF = outsideField(main);
   let dmax = 0;
   for (let i = 0; i < df.length; i++) if (df[i] > dmax) dmax = df[i];
 
@@ -295,8 +387,12 @@ export function inflate(main: Cutout, depthImg: Cutout | null, slot: ArtSlot): I
   const vert = (i: number, j: number): void => {
     const k = j * (nx + 1) + i;
     if (vf[k] >= 0) return;
-    const px = Math.min(W, i * cellPx), py = Math.min(H, j * cellPx);
-    const d = sampleBilinear(df, W, H, px, py);
+    // 剪影外的頂點貼到輪廓上：側牆才會取到不透明的顏色，從側面看不會透空
+    const gx0 = Math.min(W, i * cellPx), gy0 = Math.min(H, j * cellPx);
+    const [px, py] = snapToContour(outF, W, H, gx0, gy0, cellPx * 1.5);
+    const snapped = px !== gx0 || py !== gy0;
+    // 貼到輪廓的頂點厚度為 0：正反兩面在這裡接起來，不會留縫
+    const d = snapped ? 0 : sampleBilinear(df, W, H, px, py);
     const t = Math.min(1, d / Math.max(1e-3, dSat));
     const shape = Math.sqrt(t * (2 - t));
     const row = ny - j; // 0＝底部
@@ -306,8 +402,8 @@ export function inflate(main: Cutout, depthImg: Cutout | null, slot: ArtSlot): I
     if (hz > maxHalf) maxHalf = hz;
     const x = (px / W - 0.5) * worldW, y = (1 - py / H) * worldH;
     const u = px / W, v = py / H; // DataTexture 不翻轉：第 0 列＝圖片頂端
-    vf[k] = pos.length / 3; pos.push(x, y, zc + hz); uv.push(u, v);
-    vb[k] = pos.length / 3; pos.push(x, y, zc - hz); uv.push(u, v);
+    vf[k] = pos.length / 3; pos.push(x, y, zc + hz); uv.push(atlas ? u * 0.5 : u, v);
+    vb[k] = pos.length / 3; pos.push(x, y, zc - hz); uv.push(atlas ? 0.5 + u * 0.5 : u, v);
   };
   for (let j = 0; j < ny; j++) for (let i = 0; i < nx; i++) {
     if (!use[j * nx + i]) continue;

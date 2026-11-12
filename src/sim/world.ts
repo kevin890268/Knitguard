@@ -51,6 +51,9 @@ export class World {
   waveTimer = 60;
   autoWaves = true;
   gameOver = false;
+  /** 撐過幾波就贏（0 = 無限模式）。打到這一波後不再出新的波次，清光場上的敵人就勝利 */
+  victoryWave = 0;
+  victory = false;
   time = 0;
   tick = 0;
   kills = 0;
@@ -80,6 +83,13 @@ export class World {
     for (let x = 0; x < w; x++) edge.push(x, (h - 1) * w + x);
     for (let y = 1; y < h - 1; y++) edge.push(y * w, y * w + w - 1);
     this.spawnPoints = edge.filter((i) => this.flow.dist[i] < Infinity);
+    if (this.spawnPoints.length < 8) {
+      // 有些地圖的邊緣全被石頭或水擋住，走不到城堡 → 改用走得到、而且離城堡最遠的格子
+      const reach: number[] = [];
+      for (let i = 0; i < w * h; i++) if (this.flow.dist[i] < Infinity && !this.isSolid(i % w, Math.floor(i / w))) reach.push(i);
+      reach.sort((a, b) => this.flow.dist[b] - this.flow.dist[a]);
+      this.spawnPoints.push(...reach.slice(0, 60));
+    }
   }
 
   // ---------------------------------------------------------------- 主更新
@@ -92,7 +102,8 @@ export class World {
     }
     if (this.flowDirty) this.recomputeFlow();
     this.gold += ECON.passiveIncome * dt;
-    if (this.autoWaves) {
+    const lastWave = this.victoryWave > 0 && this.wave >= this.victoryWave;
+    if (this.autoWaves && !lastWave) {
       this.waveTimer -= dt;
       if (this.waveTimer <= 0) this.spawnWave();
     }
@@ -102,10 +113,20 @@ export class World {
     this.updateBuildings(dt);
     this.resolveCollisions();
     this.cleanup(dt);
+    if (lastWave && !this.gameOver && this.pendingSpawns === 0 && this.enemyCount === 0) this.victory = true;
+  }
+
+  /** 場上活著的敵人數量 */
+  get enemyCount(): number {
+    const u = this.units;
+    let n = 0;
+    for (let i = 0; i < u.hi; i++) if (u.alive[i] && u.team[i] === Team.Enemy) n++;
+    return n;
   }
 
   // ---------------------------------------------------------------- 波次 / 生成
   spawnWave(): void {
+    if (this.victoryWave > 0 && this.wave >= this.victoryWave) return; // 已經是最後一波
     this.wave++;
     this.waveTimer = this.waveInterval;
     const w = this.wave;

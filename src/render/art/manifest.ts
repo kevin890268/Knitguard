@@ -8,7 +8,7 @@ import { BK, UK } from '../../sim/data';
  * 選用的附加圖：
  *   `<id>_side.png`（主圖是正面時）/ `<id>_front.png`（主圖是側面時）：
  *   另一個角度的剪影，用來決定每一列的厚度（更像真的 3D）。只用形狀，不用顏色
- *   背面一律是正面花色透過來的鏡像（像布偶兩面印同一張圖）
+ *   `<id>_back.png`：背面的花色（輪廓沿用正面）；沒有就用正面透過來的鏡像
  *
  * 詳細的生成規則與提示詞見 docs/art-pipeline.md。
  */
@@ -49,7 +49,7 @@ const building = (id: string, label: string, kind: number, height: number, extra
 });
 
 export const ART_SLOTS: ArtSlot[] = [
-  unit('sheep', '綿羊兵（羊人）', UK.Sheep, 'side'),
+  unit('sheep', '綿羊兵（羊人）', UK.Sheep, 'front', { height: 1.2, depth: 0.3, bgTolerance: 30 }),
   unit('fuzz', '毛球怪', UK.Fuzz, 'front', { depth: 0.4 }),
   unit('runner', '飛毛蟲', UK.Runner, 'side'),
   unit('brute', '大毛怪', UK.Brute, 'front', { height: 1.3, depth: 0.38 }),

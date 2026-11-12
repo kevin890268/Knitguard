@@ -2,13 +2,14 @@ import GUI from 'lil-gui';
 import type { GameLoop } from '../core/loop';
 import { ART_SLOTS } from '../render/art/manifest';
 import type { GameRenderer } from '../render/renderer';
+import type { Renderer2D } from '../render2d/renderer2d';
 import type { World } from '../sim/world';
 
 export interface DevContext {
   getWorld(): World;
   newWorld(seed?: number): void;
   loop: GameLoop;
-  renderer: GameRenderer;
+  renderer: GameRenderer | Renderer2D;
 }
 
 /** 開發者沙盒面板（右上角）。可隨時加新的除錯按鈕。 */
@@ -50,6 +51,8 @@ export function createDevPanel(ctx: DevContext): GUI {
   const fView = gui.addFolder('顯示');
   fView.add(ctx.renderer, 'showFlow').name('流場箭頭 (F)').listen();
   fView.add(ctx.renderer, 'unitShadows').name('單位陰影');
+  const is3d = new URLSearchParams(location.search).has('3d');
+  fView.add({ go: () => { location.search = is3d ? '' : '?3d'; } }, 'go').name(is3d ? '切換到 2D 斜角' : '切換到 3D');
 
   // ---------------------------------------------------------------- 美術（GPT 圖片 → 3D）
   const art = ctx.renderer.art;

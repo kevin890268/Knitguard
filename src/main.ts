@@ -2,9 +2,15 @@ import './style.css';
 import { GameLoop } from './core/loop';
 import { createDevPanel } from './debug/devPanel';
 import { isTyping } from './render/camera';
+import { makeCutout } from './render/art/imageTo3d';
 import { GameRenderer } from './render/renderer';
+import { Renderer2D } from './render2d/renderer2d';
 import { BK, BUILDING_KINDS, UK } from './sim/data';
 import { MAX_UNITS, World } from './sim/world';
+
+/** 預設是 2D 斜角；網址加 ?3d 用 3D 版 */
+const USE_3D = new URLSearchParams(location.search).has('3d');
+export type AnyRenderer = GameRenderer | Renderer2D;
 
 // ---------------------------------------------------------------- 工具列定義
 type ToolId = 'select' | 'wall' | 'tower' | 'barracks' | 'erase' | 'rally' | 'sheep' | 'enemy';
@@ -23,8 +29,11 @@ const $ = (id: string) => document.getElementById(id)!;
 const app = $('app');
 
 let world = new World(Math.floor(Math.random() * 1e6));
-const renderer = new GameRenderer(app, MAX_UNITS);
+const renderer: AnyRenderer = USE_3D ? new GameRenderer(app, MAX_UNITS) : new Renderer2D(app, MAX_UNITS);
 renderer.setWorld(world);
+$('help').innerHTML = USE_3D
+  ? '左鍵：使用工具（牆可拖曳）<br>右鍵拖曳：旋轉　滾輪：縮放<br>WASD：移動　Q/E：轉向<br>空白：下一波　P：暫停　F：流場　U：升級'
+  : '左鍵：使用工具（牆可拖曳）<br>右鍵拖曳：平移　滾輪：縮放<br>WASD：移動<br>空白：下一波　P：暫停　F：流場　U：升級';
 
 let tool: ToolId = 'select';
 let mouse = { x: 0, y: 0, in: false };
@@ -32,26 +41,70 @@ let held = false;
 let lastPaintTile = -1;
 let lastSpray = 0;
 
+// ---------------------------------------------------------------- DEMO 設定
+/** DEMO：撐過 5 波就贏。網址加 ?dev 顯示開發者沙盒和除錯工具（或按 ` 鍵） */
+const DEV = new URLSearchParams(location.search).has('dev');
+const DEMO = { victoryWave: 5, firstWave: 35, interval: 40 };
+let started = false;
+
+function setupWorld(w: World): void {
+  w.victoryWave = DEMO.victoryWave;
+  w.waveTimer = DEMO.firstWave;
+  w.waveInterval = DEMO.interval;
+}
+setupWorld(world);
+
 function newWorld(seed?: number): void {
   world = new World(seed ?? Math.floor(Math.random() * 1e6));
+  setupWorld(world);
   renderer.setWorld(world);
   $('over').style.display = 'none';
 }
 
 const loop = new GameLoop(
-  (dt) => { if (!world.gameOver) world.step(dt); },
+  (dt) => { if (started && !world.gameOver && !world.victory) world.step(dt); },
   (alpha, frameDt) => {
     renderer.cam.update(frameDt);
     updateGhost();
     renderer.render(alpha);
-    if (world.gameOver && $('over').style.display !== 'flex') {
-      $('overTxt').textContent = `💔 城堡被拆了！撐過 ${world.wave} 波，擊殺 ${world.kills}`;
+    if ((world.gameOver || world.victory) && $('over').style.display !== 'flex') {
+      $('overTxt').innerHTML = world.victory
+        ? `🎉 守住山谷了！<br><small>撐過 ${world.wave} 波，擊殺 ${world.kills}，城堡還剩 ${Math.ceil(world.base.hp)} 耐久</small>`
+        : `💔 城堡被拆了！<br><small>撐到第 ${world.wave} 波，擊殺 ${world.kills}</small>`;
       $('over').style.display = 'flex';
     }
   },
 );
 
-createDevPanel({ getWorld: () => world, newWorld, loop, renderer });
+const gui = createDevPanel({ getWorld: () => world, newWorld, loop, renderer });
+if (!DEV) {
+  gui.hide();
+  document.body.classList.add('demo');
+}
+addEventListener('keydown', (e) => {
+  if (e.key === '`') { gui._hidden ? gui.show() : gui.hide(); document.body.classList.toggle('demo', gui._hidden); }
+});
+
+// 標題畫面：羊人圖是綠底的設定圖，載入時去背
+{
+  const hero = document.querySelector<HTMLImageElement>('#title .hero')!;
+  hero.style.visibility = 'hidden';
+  const src = new Image();
+  src.onload = () => {
+    const c = makeCutout(src, 30);
+    if (!c) return;
+    const cv = document.createElement('canvas');
+    cv.width = c.w; cv.height = c.h;
+    cv.getContext('2d')!.putImageData(new ImageData(new Uint8ClampedArray(c.rgba), c.w, c.h), 0, 0);
+    hero.src = cv.toDataURL();
+    hero.style.visibility = '';
+  };
+  src.src = hero.getAttribute('src')!;
+}
+$('titleStart').onclick = () => {
+  $('title').style.display = 'none';
+  started = true;
+};
 
 // ---------------------------------------------------------------- 工具列 UI
 const toolbar = $('toolbar');
@@ -155,7 +208,7 @@ addEventListener('keydown', (e) => {
   const t = TOOLS.find((o) => o.key.toLowerCase() === k);
   if (t) { setTool(t.id); return; }
   if (k === 'escape') { setTool('select'); renderer.selected = null; }
-  else if (k === ' ') { e.preventDefault(); world.spawnWave(); }
+  else if (k === ' ') { e.preventDefault(); if (started) world.spawnWave(); }
   else if (k === 'p') loop.paused = !loop.paused;
   else if (k === 'f') renderer.showFlow = !renderer.showFlow;
   else if (k === 'u' && renderer.selected) world.upgrade(renderer.selected);
@@ -171,13 +224,15 @@ $('overBtn').onclick = () => newWorld();
 function updatePanels(): void {
   $('hGold').textContent = String(Math.floor(world.gold));
   $('hBase').textContent = `${Math.ceil(world.base.hp)}/${world.base.maxHp}`;
-  $('hWave').textContent = String(world.wave);
-  $('hNext').textContent = world.autoWaves ? `下一波 ${Math.ceil(world.waveTimer)}s` : '自動波次關閉';
+  $('hWave').textContent = world.victoryWave ? `${world.wave} / ${world.victoryWave}` : String(world.wave);
+  const lastWave = world.victoryWave > 0 && world.wave >= world.victoryWave;
+  $('hNext').textContent = lastWave ? `最後一波！剩 ${world.enemyCount + world.pendingSpawns} 隻`
+    : !started ? '準備中' : world.autoWaves ? `下一波 ${Math.ceil(world.waveTimer)}s` : '自動波次關閉';
   $('hKills').textContent = String(world.kills);
-  const s = loop.stats, info = renderer.gl.info.render;
+  const s = loop.stats;
   $('stats').textContent =
     `FPS ${s.fps}  模擬 ${s.simMs.toFixed(2)}ms  繪圖 ${s.renderMs.toFixed(2)}ms\n` +
-    `單位 ${world.units.count}  待生成 ${world.pendingSpawns}  draw calls ${info.calls}  三角形 ${(info.triangles / 1000).toFixed(0)}k\n` +
+    `單位 ${world.units.count}  待生成 ${world.pendingSpawns}  ${renderer.drawStats()}\n` +
     `速度 x${loop.timeScale}${loop.paused ? '（暫停）' : ''}  種子 ${world.seed}`;
 
   for (const t of TOOLS) {

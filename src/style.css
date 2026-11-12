@@ -51,5 +51,28 @@ html, body { margin: 0; height: 100%; overflow: hidden; background: #f3e9dc; col
 #over button { font: inherit; font-size: 18px; padding: 8px 20px; border-radius: 12px; border: 2px dashed var(--stitch);
   background: var(--cream); color: var(--ink); cursor: pointer; }
 
+#over small { font-size: 16px; opacity: .9; }
+#overTxt { text-align: center; line-height: 1.5; }
+
+/* 標題畫面 */
+#title { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; padding: 16px;
+  background: radial-gradient(ellipse at center, #fbf4eacc, #e9dcc9ee); z-index: 10; }
+#title .card { position: relative; max-width: 520px; width: 100%; padding: 22px 26px 18px; text-align: center;
+  background: var(--cream); border: 2px dashed var(--stitch); border-radius: 22px;
+  box-shadow: 0 4px 0 #d8c3ab, 0 14px 40px #0003; }
+#title .hero { height: 150px; margin-top: -95px; filter: drop-shadow(0 6px 6px #0002); }
+#title h1 { margin: 2px 0 6px; font-size: 34px; letter-spacing: 1px; color: #6b4a2a; }
+#title h1 span { display: block; font-size: 15px; font-weight: normal; letter-spacing: 4px; color: #b0455a; }
+#title .tag { margin: 0 0 12px; font-size: 14px; line-height: 1.6; }
+#title ul { text-align: left; margin: 0 0 16px; padding: 10px 14px 10px 30px; font-size: 13px; line-height: 1.8;
+  background: #fff8; border-radius: 12px; }
+#title button { font: inherit; font-size: 20px; padding: 10px 28px; border-radius: 14px; cursor: pointer;
+  border: 2px solid var(--accent); background: #fff; color: var(--ink); box-shadow: 0 3px 0 #e8b2bb; }
+#title button:hover { transform: translateY(-2px); }
+#title .demo-note { margin: 10px 0 0; font-size: 11px; opacity: .55; }
+
+/* DEMO 模式：藏起除錯用的東西（按 ` 或網址加 ?dev 顯示） */
+body.demo #stats, body.demo #toolbar .tool.debug { display: none; }
+
 .lil-gui.root { top: 10px !important; right: 10px !important; }
 @media (max-width: 1250px) { #help { display: none; } }

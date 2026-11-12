@@ -8,6 +8,10 @@ import { RtsCamera } from './camera';
 import { buildingMesh, treeGeometry, unitGeometry } from './models';
 import { makeKnitTexture, WoolMaterials } from './wool';
 
+/** 地面的針織貼圖：每幾格重複一次（越大針目越大、越不密），以及深淺對比（1＝和物件一樣） */
+const GROUND_UV_TILES = 4;
+const GROUND_KNIT_CONTRAST = 0.45;
+
 const TILE_COLORS: Record<number, number> = {
   [Tile.Grass]: 0xa8cf86,
   [Tile.Rock]: 0xb9b2a6,
@@ -38,6 +42,8 @@ export class GameRenderer {
   private treeMesh: THREE.InstancedMesh | null = null;
   private treeTiles: number[] = [];
   private procTreeGeo = treeGeometry();
+  /** 地面專用材質：針織紋理比物件淡、針目比較大 */
+  private groundMat = new THREE.MeshStandardMaterial({ map: makeKnitTexture(GROUND_KNIT_CONTRAST), vertexColors: true, roughness: 1, metalness: 0 });
   private counts: Int32Array;
   private buildingObjs = new Map<number, { obj: THREE.Group; level: number; bar: THREE.Mesh }>();
   private bVersion = -1;
@@ -181,6 +187,11 @@ export class GameRenderer {
     if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
   }
 
+  drawStats(): string {
+    const info = this.gl.info.render;
+    return `draw calls ${info.calls}  三角形 ${(info.triangles / 1000).toFixed(0)}k`;
+  }
+
   get canvas(): HTMLCanvasElement {
     return this.gl.domElement;
   }
@@ -294,7 +305,7 @@ export class GameRenderer {
         pos[v * 3] = vx;
         pos[v * 3 + 1] = water === n ? -0.35 : water > 0 ? -0.1 : Math.random() * 0.03;
         pos[v * 3 + 2] = vy;
-        uv[v * 2] = vx / 2; uv[v * 2 + 1] = vy / 2;
+        uv[v * 2] = vx / GROUND_UV_TILES; uv[v * 2 + 1] = vy / GROUND_UV_TILES;
       }
     }
     const idx: number[] = [];
@@ -308,7 +319,7 @@ export class GameRenderer {
     geo.setAttribute('uv', new THREE.BufferAttribute(uv, 2));
     geo.setIndex(idx);
     geo.computeVertexNormals();
-    const mesh = new THREE.Mesh(geo, this.mats.get(0xffffff, { vertexColors: true }));
+    const mesh = new THREE.Mesh(geo, this.groundMat);
     mesh.receiveShadow = true;
     return mesh;
   }

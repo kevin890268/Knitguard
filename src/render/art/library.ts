@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { glbToModel, loadGlb, type GlbFile } from './glb';
-import { inflate, makeCutout, makeTexture, type Cutout } from './imageTo3d';
+import { combineFrontBack, inflate, makeCutout, makeTexture, type Cutout } from './imageTo3d';
 import { ART_SLOTS, type ArtSlot } from './manifest';
 
 export interface ArtModel {
@@ -23,8 +23,10 @@ interface Entry {
   glb: GlbFile | null;
   img: HTMLImageElement | null;
   depthImg: HTMLImageElement | null;
+  backImg: HTMLImageElement | null;
   cut: Cutout | null;
   depthCut: Cutout | null;
+  backCut: Cutout | null;
   model: ArtModel | null;
   file: string;
 }
@@ -64,7 +66,7 @@ export class ArtLibrary {
   private loads = 0;
 
   constructor(private readonly knitCanvas: HTMLCanvasElement) {
-    for (const s of ART_SLOTS) this.entries.set(s.id, { state: 'loading', glb: null, img: null, depthImg: null, cut: null, depthCut: null, model: null, file: '' });
+    for (const s of ART_SLOTS) this.entries.set(s.id, { state: 'loading', glb: null, img: null, depthImg: null, backImg: null, cut: null, depthCut: null, backCut: null, model: null, file: '' });
   }
 
   onChange(fn: (slot: ArtSlot) => void): void {
@@ -85,7 +87,7 @@ export class ArtLibrary {
     return s ? this.get(s.id) : null;
   }
 
-  status(): { id: string; 名稱: string; 狀態: string; 檔案: string; 第二張剪影: string; 三角形: number }[] {
+  status(): { id: string; 名稱: string; 狀態: string; 檔案: string; 第二張剪影: string; 背面: string; 三角形: number }[] {
     return ART_SLOTS.map((s) => {
       const e = this.entries.get(s.id)!;
       const g = e.model?.geometry;
@@ -96,7 +98,7 @@ export class ArtLibrary {
         ok: e.model?.source === 'glb' ? '✅ 3D 模型' : '✅ 圖片模型',
         error: e.glb ? '❌ 模型裡沒有網格' : '❌ 圖片裡找不到主體',
       }[e.state];
-      return { id: s.id, 名稱: s.label, 狀態: label, 檔案: e.file, 第二張剪影: e.depthImg ? '有' : '', 三角形: tri };
+      return { id: s.id, 名稱: s.label, 狀態: label, 檔案: e.file, 第二張剪影: e.depthImg ? '有' : '', 背面: e.backImg ? '有' : '', 三角形: tri };
     });
   }
 
@@ -114,13 +116,15 @@ export class ArtLibrary {
       const glb = await loadGlb(`${MODELS}${slot.id}.glb${q}`);
       const main = glb ? null : await findImage(slot.id, q);
       const other = main ? await findImage(`${slot.id}_${slot.view === 'front' ? 'side' : 'front'}`, q) : null;
+      const back = main ? await findImage(`${slot.id}_back`, q) : null;
       if (n !== this.loads) return; // 有更新的讀取在進行
       const e = this.entries.get(slot.id)!;
       e.glb = glb;
       e.img = main?.img ?? null;
       e.file = glb ? `models/${slot.id}.glb` : main ? `art/${main.file}` : '';
       e.depthImg = other?.img ?? null;
-      e.cut = e.depthCut = null;
+      e.backImg = back?.img ?? null;
+      e.cut = e.depthCut = e.backCut = null;
       this.rebuild(slot.id, true);
     }));
     console.info(`🎨 美術：${this.summary()}`);
@@ -144,14 +148,16 @@ export class ArtLibrary {
       if (recut || !e.cut) {
         e.cut = makeCutout(e.img, slot.bgTolerance);
         e.depthCut = e.depthImg ? makeCutout(e.depthImg, slot.bgTolerance) : null;
+        e.backCut = e.backImg ? makeCutout(e.backImg, slot.bgTolerance) : null;
       }
       if (!e.cut) {
         e.state = 'error';
       } else {
-        const r = inflate(e.cut, e.depthCut, slot);
-        const map = makeTexture(e.cut, this.knitCanvas, slot.knit, slot.height);
-        const material = new THREE.MeshStandardMaterial({ map, alphaTest: 0.5, alphaToCoverage: true, roughness: 1, metalness: 0 });
-        const depthMaterial = new THREE.MeshDepthMaterial({ depthPacking: THREE.RGBADepthPacking, map, alphaTest: 0.5 });
+        const atlas = !!e.backCut;
+        const r = inflate(e.cut, e.depthCut, slot, atlas);
+        const map = makeTexture(atlas ? combineFrontBack(e.cut, e.backCut!) : e.cut, this.knitCanvas, slot.knit, slot.height);
+        const material = new THREE.MeshStandardMaterial({ map, alphaTest: 0.3, alphaToCoverage: true, roughness: 1, metalness: 0 });
+        const depthMaterial = new THREE.MeshDepthMaterial({ depthPacking: THREE.RGBADepthPacking, map, alphaTest: 0.3 });
         e.model = { slot, geometry: r.geometry, material, depthMaterial, width: r.width, height: r.height, depth: r.depth, source: 'image' };
         e.state = 'ok';
       }
