@@ -44,6 +44,8 @@
 | 🌳 樹人族 | 重型標槍兵 | `treant/javelin/` | ✅ 7 方向（第二排攻擊動作還沒用） | `treant_javelin/` |
 | 🌳 樹人族 | 重型斧頭車 | `treant/axecart/` | ✅ 11 方向 | `treant_axecart/` |
 | 🌳 樹人族 | 重型巨棒兵 | `treant/club/` | ✅ 7 方向（第二排攻擊動作還沒用） | `treant_club/` |
+| 💀 骨頭族（敵人） | 骷髏雜兵、劍兵、弓兵、旗手、骨頭車 | `bone/<grunt,sword,bow,flag,cart>/` | ✅ 只取第一排旋轉圖（劍兵白底 -FloodWhite） | `bone_<名字>/` |
+| 🌱 毛球族（敵人） | 幼毛球、毛球獸、角毛球獸、巨角毛球王 | `enemies/fuzzball/` | ✅ 一張四階段設定圖，每階段 4 個角度（睡覺、倒地、攻擊姿勢、零件還沒用） | `fuzz/`、`runner/`、`fuzz_horn/`、`brute/` |
 | 🐂 牛人族 | 重型衝撞車 | `bull/ram/` | ✅ 16 方向（原圖是半透明白底，切的時候去掉） | `bull_ram/` |
 
 ## 每個兵種資料夾

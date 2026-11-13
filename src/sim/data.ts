@@ -128,14 +128,17 @@ export const UK = {
   TreantShield: 39, TreantJavelin: 40, TreantAxeCart: 41, TreantClub: 42,
   // ---- 敵人：骨頭族（最基本的敵人）
   BoneGrunt: 43, BoneSword: 44, BoneBow: 45, BoneFlag: 46, BoneCart: 47,
+  // 毛球族第三階段（第一、二、四階段是最上面的 Fuzz、Runner、Brute）
+  HornFuzz: 48,
 } as const;
 
 const P = Team.Player, L = Armor.Light, H = Armor.Heavy;
 export const UNIT_KINDS: UnitKind[] = [
   // ---- 敵人
-  { name: '毛球怪', team: Team.Enemy, hp: 30, speed: 1.7, radius: 0.28, damage: 4, attackCd: 1, reach: 0.1, aggro: 3.5, reward: 1, color: 0x9b7fd4, scale: 0.55, model: 'monster', armor: L },
-  { name: '飛毛蟲', team: Team.Enemy, hp: 16, speed: 3.2, radius: 0.22, damage: 3, attackCd: 0.7, reach: 0.1, aggro: 3.5, reward: 1, color: 0xf0a35e, scale: 0.42, model: 'monster', armor: L },
-  { name: '大毛怪', team: Team.Enemy, hp: 220, speed: 1.0, radius: 0.5, damage: 22, attackCd: 1.6, reach: 0.15, aggro: 3, reward: 6, color: 0x5f4b8b, scale: 1.0, model: 'monster', armor: H, meleeDef: 2, rangedDef: 2 },
+  // ---- 敵人：毛球族（會進化的野怪，四個階段：幼毛球 → 毛球獸 → 角毛球獸 → 巨角毛球王；階段越高越大、越耐打、撞得越痛）
+  { name: '幼毛球', team: Team.Enemy, hp: 30, speed: 1.7, radius: 0.28, damage: 3, attackCd: 1, reach: 0.1, aggro: 3.5, reward: 1, color: 0xefe6d0, scale: 0.5, model: 'monster', armor: L },
+  { name: '毛球獸', team: Team.Enemy, hp: 70, speed: 2.4, radius: 0.32, damage: 7, attackCd: 1.1, reach: 0.12, aggro: 4, reward: 2, color: 0xa9c46a, scale: 0.62, model: 'monster', armor: L },
+  { name: '巨角毛球王', team: Team.Enemy, hp: 420, speed: 1.1, radius: 0.58, damage: 28, attackCd: 1.8, reach: 0.2, aggro: 3.5, reward: 15, color: 0x7a9a4a, scale: 1.2, model: 'monster', armor: H, meleeDef: 2, rangedDef: 2 },
   // ---- 我方：羊圈產的村民兵（舊）
   { name: '綿羊兵', team: P, hp: 70, speed: 2.6, radius: 0.3, damage: 6, attackCd: 1.25, reach: 0.12, aggro: 4.5, reward: 0, color: 0xfffaf0, scale: 0.62, model: 'sheep', armor: L },
   // ---- 羊族
@@ -196,11 +199,13 @@ export const UNIT_KINDS: UnitKind[] = [
   { name: '重型巨棒兵', team: P, hp: 240, speed: 1.25, radius: 0.48, damage: 18, attackCd: 3.1, reach: 0.3, aggro: 4.5, reward: 0, color: 0x7a9a5a, scale: 1.0, model: 'sheep', armor: H, meleeDef: 3, rangedDef: 2, upgAtk: 2, sturdy: true },
   // ---- 敵人：骨頭族（最基本的敵人，跟著屍潮來）。還沒有圖，暫用米白色的毛球
   // 骷髏雜兵：沒有武器，數量最多　骷髏劍兵：一般近戰，不持盾　骷髏弓兵：遠程　骷髏旗手：不打人，幫周圍骷髏加攻擊　骷髏骨頭車：近戰攻城器，拆建築 ×3
-  { name: '骷髏雜兵', team: Team.Enemy, hp: 35, speed: 1.8, radius: 0.27, damage: 4, attackCd: 1.1, reach: 0.1, aggro: 3.5, reward: 1, color: 0xe8e2d0, scale: 0.55, model: 'monster', armor: L },
-  { name: '骷髏劍兵', team: Team.Enemy, hp: 55, speed: 1.7, radius: 0.29, damage: 7, attackCd: 1.1, reach: 0.15, aggro: 4, reward: 2, color: 0xd8d0b8, scale: 0.6, model: 'monster', armor: L, meleeDef: 1 },
-  { name: '骷髏弓兵', team: Team.Enemy, hp: 35, speed: 1.7, radius: 0.27, damage: 5, attackCd: 1.6, reach: 0.1, aggro: 6, reward: 2, color: 0xc8c0a8, scale: 0.56, model: 'monster', armor: L, range: 5, proj: 'arrow' },
-  { name: '骷髏旗手', team: Team.Enemy, hp: 50, speed: 1.7, radius: 0.28, damage: 0, attackCd: 1, reach: 0.1, aggro: 0, reward: 3, color: 0xe0b0a0, scale: 0.6, model: 'monster', armor: L, support: true, skill: { type: 'horn', radius: 4, atk: 2 } },
-  { name: '骷髏骨頭車', team: Team.Enemy, hp: 180, speed: 1.0, radius: 0.5, damage: 18, attackCd: 2.5, reach: 0.2, aggro: 3, reward: 6, color: 0xb8a888, scale: 1.0, model: 'monster', armor: H, meleeDef: 2, rangedDef: 6, wheeled: true, bldMul: 3 },
+  { name: '骷髏雜兵', team: Team.Enemy, hp: 35, speed: 1.8, radius: 0.27, damage: 4, attackCd: 1.1, reach: 0.1, aggro: 3.5, reward: 1, color: 0xe8e2d0, scale: 0.62, model: 'monster', armor: L },
+  { name: '骷髏劍兵', team: Team.Enemy, hp: 55, speed: 1.7, radius: 0.29, damage: 7, attackCd: 1.1, reach: 0.15, aggro: 4, reward: 2, color: 0xd8d0b8, scale: 0.66, model: 'monster', armor: L, meleeDef: 1 },
+  { name: '骷髏弓兵', team: Team.Enemy, hp: 35, speed: 1.7, radius: 0.27, damage: 5, attackCd: 1.6, reach: 0.1, aggro: 6, reward: 2, color: 0xc8c0a8, scale: 0.64, model: 'monster', armor: L, range: 5, proj: 'arrow' },
+  { name: '骷髏旗手', team: Team.Enemy, hp: 50, speed: 1.7, radius: 0.28, damage: 0, attackCd: 1, reach: 0.1, aggro: 0, reward: 3, color: 0xe0b0a0, scale: 0.66, model: 'monster', armor: L, support: true, skill: { type: 'horn', radius: 4, atk: 2 } },
+  { name: '骷髏骨頭車', team: Team.Enemy, hp: 180, speed: 1.0, radius: 0.5, damage: 18, attackCd: 2.5, reach: 0.2, aggro: 3, reward: 6, color: 0xb8a888, scale: 1.05, model: 'monster', armor: H, meleeDef: 2, rangedDef: 6, wheeled: true, bldMul: 3 },
+  // 毛球族第三階段：角毛球獸（衝鋒撞擊，打建築有加成）
+  { name: '角毛球獸', team: Team.Enemy, hp: 150, speed: 1.9, radius: 0.42, damage: 14, attackCd: 1.3, reach: 0.15, aggro: 4, reward: 5, color: 0x8aa55a, scale: 0.85, model: 'monster', armor: H, meleeDef: 1, rangedDef: 1, bldMul: 1.5 },
 ];
 
 export interface BuildingKind {
@@ -329,6 +334,7 @@ export const TRIBES: { id: string; name: string; kinds: number[] }[] = [
 /** 敵人的種族（屍潮裡出現；圖鑑最下面一排、對打測試的 enemy 模式用） */
 export const ENEMY_TRIBES: { id: string; name: string; kinds: number[] }[] = [
   { id: 'bone', name: '💀 骨頭族', kinds: [UK.BoneGrunt, UK.BoneSword, UK.BoneBow, UK.BoneFlag, UK.BoneCart] },
+  { id: 'fuzz', name: '🌱 毛球族', kinds: [UK.Fuzz, UK.Runner, UK.HornFuzz, UK.Brute] },
 ];
 
 /**
@@ -337,7 +343,7 @@ export const ENEMY_TRIBES: { id: string; name: string; kinds: number[] }[] = [
  */
 export const WAVE_MIX: [number, number][] = [
   [UK.BoneGrunt, 0.32], [UK.BoneSword, 0.2], [UK.BoneBow, 0.1], [UK.BoneFlag, 0.03], [UK.BoneCart, 0.03],
-  [UK.Fuzz, 0.17], [UK.Runner, 0.1], [UK.Brute, 0.05],
+  [UK.Fuzz, 0.16], [UK.Runner, 0.09], [UK.HornFuzz, 0.04], [UK.Brute, 0.015],
 ];
 
 /** 經濟 */

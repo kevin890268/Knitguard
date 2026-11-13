@@ -67,7 +67,7 @@ try {
       const out = [];
       for (const mul of [1, 2, 3]) {
         const r = duel({ kinds: t.kinds }, { kinds: e.kinds, count: 0, mul }, 3);
-        out.push(`×${mul}：${r.winner === 'A' ? '我方贏' : r.winner === 'B' ? '骨頭贏' : '平手'}`);
+        out.push(`×${mul}：${r.winner === 'A' ? '我方贏' : r.winner === 'B' ? '敵人贏' : '平手'}`);
       }
       console.log(`${t.name} vs ${e.name}　${out.join('　')}`);
     }

@@ -58,6 +58,8 @@ const app = $('app');
 const PARAMS = new URLSearchParams(location.search);
 const UNIT_DEMO = PARAMS.has('units');
 const BUILDING_DEMO = PARAMS.has('buildings');
+/** ?enemies：敵人圖鑑（只排敵人，介面藏起來；和單位圖鑑同一套） */
+const ENEMY_DEMO = PARAMS.has('enemies');
 /** 單位圖鑑用小地圖（48×48），其他 DEMO 用一般大小 */
 const GALLERY_SIZE = 48;
 const mapSize = () => (UNIT_DEMO || BUILDING_DEMO ? undefined : GALLERY_SIZE);
@@ -91,7 +93,7 @@ const DEV = new URLSearchParams(location.search).has('dev');
  */
 const DEMO = {
   waves: [900, 300], // 第 1 波大、第 2 波小
-  // 屍潮組成用預設（data.ts 的 WAVE_MIX：骨頭族為主，混一些毛球怪）
+  // 屍潮組成用預設（data.ts 的 WAVE_MIX：骨頭族為主，混一些毛球族）
   firstWave: 25,
   interval: 45,
   perKind: 6,
@@ -112,7 +114,9 @@ let started = false;
  */
 
 /** 單位圖鑑的排法：一個種族一排 */
-const GALLERY = [...TRIBES, ...ENEMY_TRIBES].map((t) => ({ tribe: t.name, kinds: t.kinds }));
+const GALLERY = (ENEMY_DEMO
+  ? ENEMY_TRIBES
+  : [...TRIBES, ...ENEMY_TRIBES]).map((t) => ({ tribe: t.name, kinds: t.kinds }));
 
 function setupGallery(w: World): void {
   w.autoWaves = false;
@@ -130,7 +134,7 @@ function setupGallery(w: World): void {
     let c = 0;
     for (const kind of row.kinds) for (let k = 0; k < 3; k++, c++) {
       const along = (c - (n - 1) / 2) * 0.75 + (Math.floor(c / 3) - (row.kinds.length - 1) / 2) * 0.6; // 同一種兵靠近一點，種類之間空一點
-      const down = 4 + r * 2.6; // 每排之間要夠遠（斜角畫面上往下 1 格只有半格高）
+      const down = ENEMY_DEMO ? 6.5 + r * 3.8 : 4 + r * 2.6; // 每排之間要夠遠（斜角畫面上往下 1 格只有半格高）
       const gx = cx + down / 2 + along, gy = cy + down / 2 - along;
       const i = w.spawnUnitAt(kind, gx, gy);
       if (i < 0) continue;
@@ -146,7 +150,7 @@ function setupGallery(w: World): void {
 /** 單位圖鑑：鏡頭對準圖鑑中間 */
 function lookAtGallery(): void {
   if (UNIT_DEMO || BUILDING_DEMO) return;
-  const c = world.map.baseX + 1.5 + (4 + (GALLERY.length - 1) * 2.6) / 4;
+  const c = world.map.baseX + 1.5 + (ENEMY_DEMO ? 6.5 + (GALLERY.length - 1) * 3.8 : 4 + (GALLERY.length - 1) * 2.6) / 4 + (ENEMY_DEMO ? 1 : 0);
   renderer.cam.target.set(c, 0, c);
 }
 
