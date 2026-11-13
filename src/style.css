@@ -66,7 +66,18 @@ html, body { margin: 0; height: 100%; overflow: hidden; background: #f3e9dc; col
 #selGrid .mini.emoji { font-size: 26px; }
 #selGrid .tile b { position: absolute; right: 3px; bottom: 6px; font-size: 12px; color: #fff; text-shadow: 0 0 3px #000, 0 0 2px #000; }
 #selGrid .tile i { position: absolute; left: 0; bottom: 0; height: 4px; }
-#selGrid .hint { margin: auto; font-size: 13px; opacity: .55; }
+#selGrid .hint { margin: auto; font-size: 13px; opacity: .55; text-align: center; }
+/* 中：建築的工作進度（升級、訓練…） */
+#selGrid .work { flex: 1 1 100%; width: 100%; min-width: 0; display: flex; flex-direction: column; gap: 6px; }
+#selGrid .job { display: flex; align-items: center; gap: 8px; padding: 6px 8px; border-radius: 10px; border: 2px solid #e2cdb0; background: #fff; }
+#selGrid .job .ico { font-size: 22px; }
+#selGrid .jb { flex: 1; min-width: 0; }
+#selGrid .jl { display: flex; justify-content: space-between; gap: 6px; font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#selGrid .jl small { opacity: .6; }
+#selGrid .jp { height: 8px; margin-top: 3px; border-radius: 4px; background: #eadbc6; overflow: hidden; }
+#selGrid .jp i { display: block; height: 100%; background: linear-gradient(90deg, #8fd16a, #5aa83c); transition: width .2s; }
+#selGrid .jc { border: 2px solid #e2cdb0; border-radius: 8px; background: var(--cream); cursor: pointer; font: inherit; padding: 2px 7px; }
+#selGrid .jc:hover { border-color: var(--accent); }
 
 /* 右：指令卡（4 欄） */
 #cmdCard { display: grid; grid-template-columns: repeat(4, 1fr); grid-auto-rows: 48px; gap: 5px; padding: 7px; align-content: start; }
@@ -86,22 +97,26 @@ html, body { margin: 0; height: 100%; overflow: hidden; background: #f3e9dc; col
 #minimap { display: block; width: 280px; height: 140px; cursor: pointer; }
 
 /* 功能表：資訊列上面一小排分類，點了再往上多一排功能 */
-#funcBar, #funcSub { position: fixed; left: 8px; display: flex; gap: 5px; z-index: 2; }
-#funcBar { bottom: 174px; }
-#funcSub { bottom: 210px; display: none; padding: 5px; flex-wrap: wrap; max-width: calc(100% - 16px);
+/* 由下往上疊：分類 → 第一排 → 第二排（建造的建築） */
+#funcStack { position: fixed; left: 8px; bottom: 174px; z-index: 2; display: flex; flex-direction: column-reverse; align-items: flex-start; gap: 6px;
+  max-width: calc(100% - 16px); pointer-events: none; }
+#funcStack > * { pointer-events: auto; }
+#funcBar, #funcSub, #funcSub2 { display: flex; gap: 5px; }
+#funcSub, #funcSub2 { display: none; padding: 5px; flex-wrap: wrap;
   background: #e9d9c4ee; border: 2px dashed var(--stitch); border-radius: 12px; box-shadow: 0 3px 10px #0002; }
-#funcSub.open { display: flex; }
-#funcBar button, #funcSub button { position: relative; font: inherit; font-size: 13px; color: var(--ink); cursor: pointer; white-space: nowrap;
+#funcSub.open, #funcSub2.open { display: flex; }
+#funcStack button { position: relative; font: inherit; font-size: 13px; color: var(--ink); cursor: pointer; white-space: nowrap;
   display: flex; align-items: center; gap: 4px; border-radius: 10px; border: 2px solid var(--stitch); background: var(--cream); }
 #funcBar button { padding: 3px 10px; box-shadow: 0 2px 0 #d8c3ab; }
 #funcBar button.on { border-color: var(--accent); background: #fff; transform: translateY(-2px); }
-#funcSub button { padding: 6px 10px 4px; min-height: 40px; background: #fff; }
-#funcSub button:hover, #funcBar button:hover { border-color: var(--accent); }
-#funcSub button.on { border-color: var(--accent); background: #fdecef; }
-#funcSub button:disabled, #funcSub button.poor { opacity: .45; }
-#funcSub .ico, #funcBar .ico { font-size: 16px; }
-#funcSub .cost { font-size: 10px; color: #a06a10; }
-#funcSub .key { position: absolute; right: 4px; top: 0; font-size: 9px; opacity: .5; }
+#funcSub button, #funcSub2 button { padding: 6px 10px 4px; min-height: 40px; background: #fff; }
+#funcSub button.grp { min-height: 32px; padding: 3px 10px; background: var(--cream); }
+#funcStack button:hover { border-color: var(--accent); }
+#funcSub button.on, #funcSub2 button.on { border-color: var(--accent); background: #fdecef; }
+#funcStack button:disabled, #funcStack button.poor { opacity: .45; }
+#funcStack .ico { font-size: 16px; }
+#funcStack .cost { font-size: 10px; color: #a06a10; }
+#funcStack .key { position: absolute; right: 4px; top: 0; font-size: 9px; opacity: .5; }
 
 /* 框選 */
 #dragBox { position: fixed; display: none; border: 1.5px solid #7dff7d; background: #7dff7d22; pointer-events: none; }
@@ -148,7 +163,7 @@ html, body { margin: 0; height: 100%; overflow: hidden; background: #f3e9dc; col
 #title .demo-note { margin: 10px 0 0; font-size: 11px; opacity: .55; }
 
 /* DEMO 模式：藏起除錯用的東西（按 ` 或網址加 ?dev 顯示） */
-body.demo #stats, body.demo #cmdCard .cmd.debug, body.demo #funcSub .fn.debug { display: none; }
+body.demo #stats, body.demo #cmdCard .cmd.debug, body.demo #funcStack .fn.debug { display: none; }
 
 .lil-gui.root { top: 10px !important; right: 10px !important; }
 @media (max-width: 1250px) { #help { display: none; } }

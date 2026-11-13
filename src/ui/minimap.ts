@@ -97,7 +97,7 @@ export class Minimap {
     // 建築
     for (const b of world.buildings) {
       g.fillStyle = b.kind === BK.Base ? '#e2577a' : b.kind === BK.Wall ? '#8a6a48' : '#3d78c9';
-      g.fillRect(b.tx, b.ty, b.size, b.size);
+      g.fillRect(b.tx, b.ty, b.w, b.h);
     }
     // 單位：我方藍、選到的亮綠、敵人紅
     const u = world.units, sel = this.army;

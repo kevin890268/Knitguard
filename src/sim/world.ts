@@ -16,7 +16,16 @@ export interface Building {
   kind: number;
   tx: number;
   ty: number;
-  size: number;
+  size: number; // 長寬較大的那邊（正方形建築就是邊長）
+  /** 佔地寬（x 方向）和高（y 方向）；正方形建築 w = h = size，城門是 3×1 或 1×3 */
+  w: number;
+  h: number;
+  /** 城門：開著（我方可以從中間通過） */
+  open: boolean;
+  /** 進行中的工作（升級；之後的研究、製作也放這裡）。t＝已經做了幾秒，dur＝總共要幾秒 */
+  job: { type: 'upgrade'; label: string; t: number; dur: number; cost: number } | null;
+  /** 軍營：已經訓練過幾隻（決定下一隻是哪個兵種） */
+  trained: number;
   hp: number;
   maxHp: number;
   level: number;
@@ -150,6 +159,7 @@ export class World {
       if (u.alive[i]) { u.px[i] = u.x[i]; u.py[i] = u.y[i]; }
     }
     if (this.flowDirty) this.recomputeFlow();
+    if (this.tick % 6 === 0) this.updateGates();
     if (this.tick % 30 === 0) this.gcPaths();
     this.gold += ECON.passiveIncome * dt;
     const lastWave = this.victoryWave > 0 && this.wave >= this.victoryWave;
@@ -231,41 +241,48 @@ export class World {
    *  2. 建築（2x2 以上）一定要留至少一個「出入口」：旁邊有一格不是其他建築
    *  3. 蓋下去不能把旁邊建築的最後一個出入口堵住
    */
-  canPlace(kind: number, tx: number, ty: number): boolean {
-    const s = BUILDING_KINDS[kind].size, w = this.map.w;
-    for (let y = ty; y < ty + s; y++)
-      for (let x = tx; x < tx + s; x++) {
+  /** 建築佔地（寬, 高）；rot＝轉 90 度（只有長方形的城門有差） */
+  dims(kind: number, rot = false): [number, number] {
+    const k = BUILDING_KINDS[kind], w = k.w ?? k.size, h = k.h ?? k.size;
+    return rot ? [h, w] : [w, h];
+  }
+
+  canPlace(kind: number, tx: number, ty: number, rot = false): boolean {
+    const [bw, bh] = this.dims(kind, rot), w = this.map.w;
+    for (let y = ty; y < ty + bh; y++)
+      for (let x = tx; x < tx + bw; x++) {
         if (!this.map.inBounds(x, y) || this.map.solidTerrain(x, y) || this.occ[y * w + x] >= 0 || this.roads[y * w + x]) return false;
       }
-    const block = { tx, ty, s };
-    if (s >= 2 && this.exits(tx, ty, s, block) === 0) return false;
-    // 旁邊的建築（2x2 以上）還有沒有出入口
+    const block = { tx, ty, w: bw, h: bh };
+    if (this.needsExit(kind, bw, bh) && this.exits(tx, ty, bw, bh, block) === 0) return false;
+    // 旁邊的建築還有沒有出入口
     const seen = new Set<number>();
-    for (let y = ty - 1; y <= ty + s; y++)
-      for (let x = tx - 1; x <= tx + s; x++) {
+    for (let y = ty - 1; y <= ty + bh; y++)
+      for (let x = tx - 1; x <= tx + bw; x++) {
         if (!this.map.inBounds(x, y)) continue;
         const id = this.occ[y * w + x];
         if (id < 0 || seen.has(id)) continue;
         seen.add(id);
-        const b = this.byId.get(id)!;
-        if (b.size >= 2 && this.exits(b.tx, b.ty, b.size, block) === 0) return false;
+        const o = this.byId.get(id)!;
+        if (this.needsExit(o.kind, o.w, o.h) && this.exits(o.tx, o.ty, o.w, o.h, block) === 0) return false;
       }
     return true;
   }
 
+  /** 要留出入口的建築：2x2 以上（牆、箭塔不用；城門自己就是通道） */
+  private needsExit(kind: number, w: number, h: number): boolean {
+    return kind !== BK.Gate && w >= 2 && h >= 2;
+  }
+
   /** 建築四邊（不含斜角）可以進出的格子數；block＝假裝這塊也蓋了東西 */
-  private exits(tx: number, ty: number, s: number, block?: { tx: number; ty: number; s: number }): number {
+  private exits(tx: number, ty: number, bw: number, bh: number, block?: { tx: number; ty: number; w: number; h: number }): number {
     let n = 0;
     const free = (x: number, y: number) => {
-      if (this.isSolid(x, y)) return false;
-      return !(block && x >= block.tx && x < block.tx + block.s && y >= block.ty && y < block.ty + block.s);
+      if (this.isSolid(x, y) && !this.isGatePass(x, y)) return false;
+      return !(block && x >= block.tx && x < block.tx + block.w && y >= block.ty && y < block.ty + block.h);
     };
-    for (let i = 0; i < s; i++) {
-      if (free(tx + i, ty - 1)) n++;
-      if (free(tx + i, ty + s)) n++;
-      if (free(tx - 1, ty + i)) n++;
-      if (free(tx + s, ty + i)) n++;
-    }
+    for (let i = 0; i < bw; i++) { if (free(tx + i, ty - 1)) n++; if (free(tx + i, ty + bh)) n++; }
+    for (let i = 0; i < bh; i++) { if (free(tx - 1, ty + i)) n++; if (free(tx + bw, ty + i)) n++; }
     return n;
   }
 
@@ -274,17 +291,53 @@ export class World {
    */
   exitPoint(b: Building, nx: number, ny: number): [number, number] | null {
     let best: [number, number] | null = null, bestScore = Infinity;
-    const s = b.size;
     const check = (x: number, y: number) => {
       if (this.isSolid(x, y)) return;
       const d = Math.hypot(x + 0.5 - nx, y + 0.5 - ny) + (this.roads[y * this.map.w + x] ? 0 : 1000);
       if (d < bestScore) { bestScore = d; best = [x + 0.5, y + 0.5]; }
     };
-    for (let i = 0; i < s; i++) {
-      check(b.tx + i, b.ty - 1); check(b.tx + i, b.ty + s);
-      check(b.tx - 1, b.ty + i); check(b.tx + s, b.ty + i);
-    }
+    for (let i = 0; i < b.w; i++) { check(b.tx + i, b.ty - 1); check(b.tx + i, b.ty + b.h); }
+    for (let i = 0; i < b.h; i++) { check(b.tx - 1, b.ty + i); check(b.tx + b.w, b.ty + i); }
     return best;
+  }
+
+  // ---------------------------------------------------------------- 城門
+  /**
+   * 城門（3×1 或 1×3）：中間那格加上兩邊各靠中間的半格是 2 格寬的通道。
+   * 開著時我方可以通過（只被兩端各半格的塔擋住）；敵人永遠過不去，要拆門。
+   * 自動開關：附近有我方、沒有敵人就開；敵人靠近就關。
+   */
+  isGatePass(tx: number, ty: number): boolean {
+    if (!this.map.inBounds(tx, ty)) return false;
+    const id = this.occ[ty * this.map.w + tx];
+    if (id < 0) return false;
+    const b = this.byId.get(id)!;
+    if (b.kind !== BK.Gate) return false;
+    return b.w > b.h ? tx === b.tx + 1 : ty === b.ty + 1;
+  }
+
+  /** 城門兩端的塔（各半格）：[x0, y0, x1, y1] × 2 */
+  private gateTowers(b: Building): number[] {
+    return b.w > b.h
+      ? [b.tx, b.ty, b.tx + 0.5, b.ty + 1, b.tx + 2.5, b.ty, b.tx + 3, b.ty + 1]
+      : [b.tx, b.ty, b.tx + 1, b.ty + 0.5, b.tx, b.ty + 2.5, b.tx + 1, b.ty + 3];
+  }
+
+  private updateGates(): void {
+    const u = this.units;
+    for (const b of this.buildings) {
+      if (b.kind !== BK.Gate) continue;
+      const cx = b.tx + b.w / 2, cy = b.ty + b.h / 2;
+      let friend = false, foe = false;
+      for (let i = 0; i < u.hi; i++) {
+        if (!u.alive[i]) continue;
+        const d2 = (u.x[i] - cx) ** 2 + (u.y[i] - cy) ** 2;
+        if (u.team[i] === Team.Enemy) { if (d2 < 3.5 * 3.5) { foe = true; break; } }
+        else if (d2 < 3 * 3) friend = true;
+      }
+      const open = friend && !foe;
+      if (open !== b.open) { b.open = open; this.buildingsVersion++; }
+    }
   }
 
   // ---------------------------------------------------------------- 道路
@@ -325,22 +378,22 @@ export class World {
     return this.freeBuild || this.gold >= cost;
   }
 
-  tryPlace(kind: number, tx: number, ty: number): Building | null {
+  tryPlace(kind: number, tx: number, ty: number, rot = false): Building | null {
     const cost = BUILDING_KINDS[kind].cost;
-    if (!this.canPlace(kind, tx, ty) || !this.canAfford(cost)) return null;
+    if (!this.canPlace(kind, tx, ty, rot) || !this.canAfford(cost)) return null;
     if (!this.freeBuild) this.gold -= cost;
-    return this.addBuilding(kind, tx, ty);
+    return this.addBuilding(kind, tx, ty, rot);
   }
 
-  private addBuilding(kind: number, tx: number, ty: number): Building {
-    const k = BUILDING_KINDS[kind];
+  private addBuilding(kind: number, tx: number, ty: number, rot = false): Building {
+    const k = BUILDING_KINDS[kind], [bw, bh] = this.dims(kind, rot);
     const b: Building = {
-      id: this.nextBid++, kind, tx, ty, size: k.size, hp: k.hp, maxHp: k.hp, level: 1,
+      id: this.nextBid++, kind, tx, ty, size: Math.max(bw, bh), w: bw, h: bh, open: false, job: null, trained: 0, hp: k.hp, maxHp: k.hp, level: 1,
       cd: 0, spawnT: 1, units: 0, rallyX: 0, rallyY: 0, invested: k.cost, hitT: 0, dead: false,
     };
-    for (let y = ty; y < ty + k.size; y++)
-      for (let x = tx; x < tx + k.size; x++) this.occ[y * this.map.w + x] = b.id;
-    if (kind === BK.Barracks) {
+    for (let y = ty; y < ty + bh; y++)
+      for (let x = tx; x < tx + bw; x++) this.occ[y * this.map.w + x] = b.id;
+    if (k.spawnCap) {
       const cx = tx + k.size / 2, cy = ty + k.size / 2;
       const bx = this.map.baseX + 1.5, by = this.map.baseY + 1.5;
       let dx = cx - bx, dy = cy - by;
@@ -359,8 +412,8 @@ export class World {
 
   removeBuilding(b: Building, refund: boolean): void {
     if (b.kind === BK.Base || b.dead) return;
-    for (let y = b.ty; y < b.ty + b.size; y++)
-      for (let x = b.tx; x < b.tx + b.size; x++) this.occ[y * this.map.w + x] = -1;
+    for (let y = b.ty; y < b.ty + b.h; y++)
+      for (let x = b.tx; x < b.tx + b.w; x++) this.occ[y * this.map.w + x] = -1;
     b.dead = true;
     if (refund) this.gold += Math.floor(b.invested * ECON.refundRatio);
     this.byId.delete(b.id);
@@ -371,27 +424,52 @@ export class World {
 
   upgradeCost(b: Building): number | null {
     const k = BUILDING_KINDS[b.kind];
+    if (b.job) return null; // 正在升級
+
     // 一般建築最高 MAX_LEVEL 級；有更多升級費用的（市鎮中心）照費用的數量
     if (b.level >= Math.max(MAX_LEVEL, k.upgradeCost.length + 1)) return null;
     return k.upgradeCost[b.level - 1] ?? null;
   }
 
+  /** 升級：先付錢，花一段時間（ECON.upgradeTime × 目前等級 秒）才完成（免費建造也要等） */
   upgrade(b: Building): boolean {
     const cost = this.upgradeCost(b);
     if (cost === null || !this.canAfford(cost)) return false;
     if (!this.freeBuild) this.gold -= cost;
+    const names = BUILDING_KINDS[b.kind].levelNames;
+    const label = names ? `進化：${names[b.level]}` : `升級到 Lv.${b.level + 1}`;
+    b.job = { type: 'upgrade', label, t: 0, dur: ECON.upgradeTime * b.level, cost };
+    this.buildingsVersion++;
+    return true;
+  }
+
+  /** 取消進行中的工作：全額退錢 */
+  cancelJob(b: Building): void {
+    if (!b.job) return;
+    if (!this.freeBuild) this.gold += b.job.cost;
+    b.job = null;
+    this.buildingsVersion++;
+  }
+
+  private finishJob(b: Building): void {
+    const job = b.job;
+    if (!job) return;
+    b.job = null;
+    if (job.type === 'upgrade') this.levelUp(b, job.cost);
+  }
+
+  private levelUp(b: Building, cost: number): void {
     b.invested += cost;
     b.level++;
     b.maxHp = Math.round(b.maxHp * 1.4);
     b.hp = b.maxHp;
-    if (b.kind === BK.Barracks) {
+    if (BUILDING_KINDS[b.kind].spawnCap) {
       const u = this.units;
       for (let i = 0; i < u.hi; i++) {
         if (u.alive[i] && u.owner[i] === b.id) this.applySheepLevel(i, b.level, true);
       }
     }
     this.buildingsVersion++;
-    return true;
   }
 
   setRally(b: Building, x: number, y: number): void {
@@ -413,6 +491,12 @@ export class World {
   towerRange(b: Building): number {
     return (BUILDING_KINDS[b.kind].range ?? 0) + (b.level - 1) * 1.5;
   }
+  /** 軍營下一隻要訓練的兵種 */
+  nextTrainee(b: Building): number {
+    const t = BUILDING_KINDS[b.kind].trains ?? [UK.Sheep];
+    return t[b.trained % t.length];
+  }
+
   barracksCap(b: Building): number {
     return (BUILDING_KINDS[b.kind].spawnCap ?? 0) + (b.level - 1);
   }
@@ -450,7 +534,7 @@ export class World {
       for (let x = this.base.tx; x < this.base.tx + this.base.size; x++) goals.push(y * this.map.w + x);
     this.flow.compute(this.costs, goals);
     // 玩家部隊的路徑：建築擋路 → 蓋了或拆了建築就重算
-    for (let i = 0; i < n; i++) this.pathCosts[i] = this.map.tiles[i] === Tile.Grass && this.occ[i] < 0 ? 1 : Infinity;
+    for (let i = 0; i < n; i++) this.pathCosts[i] = this.map.tiles[i] === Tile.Grass && (this.occ[i] < 0 || this.isGatePass(i % this.map.w, (i / this.map.w) | 0)) ? 1 : Infinity;
     for (const p of this.paths) if (p) p.field.compute(this.pathCosts, p.goals);
     this.computeReach();
     this.flowDirty = false;
@@ -1037,8 +1121,8 @@ export class World {
         const px = x + fx * (u.rad[i] + 0.3), py = y + fy * (u.rad[i] + 0.3);
         const b = this.buildingAtTile(Math.floor(px), Math.floor(py));
         if (b) {
-          const cx = Math.max(b.tx, Math.min(x, b.tx + b.size));
-          const cy = Math.max(b.ty, Math.min(y, b.ty + b.size));
+          const cx = Math.max(b.tx, Math.min(x, b.tx + b.w));
+          const cy = Math.max(b.ty, Math.min(y, b.ty + b.h));
           if (Math.hypot(x - cx, y - cy) <= u.rad[i] + k.reach + 0.15) {
             attacking = true;
             u.face[i] = Math.atan2(fx, fy);
@@ -1090,6 +1174,9 @@ export class World {
   }
 
   private updateBuildings(dt: number): void {
+    for (const b of this.buildings) {
+      if (b.job && (b.job.t += dt) >= b.job.dur) this.finishJob(b);
+    }
     const u = this.units;
     for (const b of this.buildings) {
       if (b.hitT > 0) b.hitT -= dt;
@@ -1117,7 +1204,7 @@ export class World {
           this.shots.push({ x1: cx, y1: cy, x2: u.x[best], y2: u.y[best], t: dur, dur, kind: 'arrow' });
           b.cd = BUILDING_KINDS[b.kind].cd ?? 1;
         } else b.cd = 0.1;
-      } else if (b.kind === BK.Barracks) {
+      } else if (BUILDING_KINDS[b.kind].spawnCap) {
         if (b.units >= this.barracksCap(b)) continue;
         b.spawnT -= dt;
         if (b.spawnT > 0) continue;
@@ -1125,8 +1212,9 @@ export class World {
         // 從建築旁邊的道路出來（沒有道路就走旁邊的空地；完全堵住就不出兵）
         const ex = this.exitPoint(b, b.rallyX, b.rallyY);
         if (!ex) continue;
-        const i = u.spawn(UK.Sheep, ex[0], ex[1], b.id);
+        const i = u.spawn(this.nextTrainee(b), ex[0], ex[1], b.id);
         if (i >= 0) {
+          b.trained++;
           this.applySheepLevel(i, b.level, true);
           u.homeX[i] = b.rallyX + this.rng.range(-0.8, 0.8);
           u.homeY[i] = b.rallyY + this.rng.range(-0.8, 0.8);
@@ -1176,6 +1264,18 @@ export class World {
       for (let ty = y0; ty <= y1; ty++) {
         for (let tx = x0; tx <= x1; tx++) {
           if (!this.isSolid(tx, ty)) continue;
+          // 開著的城門：我方只被兩端各半格的塔擋住
+          const gid = this.map.inBounds(tx, ty) ? this.occ[ty * W + tx] : -1;
+          const gb = gid >= 0 ? this.byId.get(gid)! : null;
+          if (gb && gb.kind === BK.Gate && gb.open && u.team[i] === Team.Player) {
+            const tw = this.gateTowers(gb);
+            for (let q = 0; q < 8; q += 4) {
+              const qx = Math.max(tw[q], Math.min(x, tw[q + 2])), qy = Math.max(tw[q + 1], Math.min(y, tw[q + 3]));
+              const ex = x - qx, ey = y - qy, e2 = ex * ex + ey * ey;
+              if (e2 < r * r && e2 > 1e-8) { const e = Math.sqrt(e2), kk = (r - e) / e; x += ex * kk; y += ey * kk; }
+            }
+            continue;
+          }
           const px = Math.max(tx, Math.min(x, tx + 1)), py = Math.max(ty, Math.min(y, ty + 1));
           const dx = x - px, dy = y - py, d2 = dx * dx + dy * dy;
           if (d2 >= r * r) continue;

@@ -5,7 +5,7 @@ import { isTyping } from './render/camera';
 import { makeCutout } from './render/art/imageTo3d';
 import { GameRenderer } from './render/renderer';
 import { Renderer2D } from './render2d/renderer2d';
-import { BK, BUILDING_KINDS, ECON, UK, UNIT_KINDS } from './sim/data';
+import { BK, BUILD_CATS, BUILDING_KINDS, ECON, UK, UNIT_KINDS } from './sim/data';
 import { Tile } from './sim/map';
 import { MAX_UNITS, World } from './sim/world';
 import { ArmyControl } from './ui/army';
@@ -33,6 +33,24 @@ const TOOLS: Tool[] = [
   { id: 'sheep', key: 'N', icon: '🐏', label: '放綿羊', debug: true },
   { id: 'enemy', key: 'M', icon: '👾', label: '放怪物', debug: true },
 ];
+
+/** 工具 → 功能表按鈕 */
+function toolCmd(t: Tool): CardCmd {
+  const k = t.building !== undefined ? BUILDING_KINDS[t.building] : null;
+  const rect = k && (k.w ?? k.size) !== (k.h ?? k.size);
+  return {
+    icon: t.icon, label: t.label, key: t.key, debug: t.debug,
+    cost: k ? k.cost : undefined,
+    tip: k ? `建造${t.label}（${k.w ?? k.size}×${k.h ?? k.size}${rect ? '，R 轉向' : ''}；右鍵取消）` : t.label,
+    on: () => setTool(tool === t.id ? 'select' : t.id),
+    active: () => tool === t.id,
+  };
+}
+/** 這個工具在建造選單的哪個分類 */
+function toolGroup(t: Tool): string {
+  if (t.id === 'road') return 'economy';
+  return BUILD_CATS.find((c) => t.building !== undefined && c.kinds.includes(t.building))?.id ?? 'tools';
+}
 
 const $ = (id: string) => document.getElementById(id)!;
 const app = $('app');
@@ -92,7 +110,7 @@ function setupShowcase(w: World): void {
   // 每種建築一組（等級 1、2、3 排一排），一排 7 組；每排建築的下緣貼著一條橫向道路
   const kinds = BUILDING_KINDS.map((_, i) => i).filter((k) => k !== BK.Base && k !== BK.Wall);
   kinds.forEach((kind, n) => {
-    const s = BUILDING_KINDS[kind].size;
+    const s = w.dims(kind)[1];
     const row = Math.floor(n / 7), x0 = 3 + 13 * (n % 7), roadY = by + 8 + 5 * row;
     for (let lv = 1; lv <= 3; lv++) {
       const b = w.tryPlace(kind, x0 + 4 * (lv - 1), roadY - s);
@@ -251,7 +269,7 @@ const hud = new Hud({
     const cost = world.upgradeCost(b);
     const names = BUILDING_KINDS[b.kind].levelNames;
     const next = names?.[b.level]; // 市鎮中心：下一個階段的名字
-    const up: CardCmd = { icon: '⬆️', label: cost === null ? '已滿級' : next ? `進化：${next}` : '升級', key: 'U', cost: cost ?? undefined,
+    const up: CardCmd = { icon: '⬆️', label: b.job ? '升級中…' : cost === null ? '已滿級' : next ? `進化：${next}` : '升級', key: 'U', cost: cost ?? undefined,
       tip: next ? `進化成「${next}」：更耐打` : '升級：更耐打、更強',
       on: () => { world.upgrade(b); hud.invalidate(); }, disabled: () => cost === null || !world.canAfford(cost) };
     if (b.kind === BK.Base) return [up];
@@ -260,7 +278,7 @@ const hud = new Hud({
       { icon: '✂️', label: `拆除 +${Math.floor(b.invested * 0.5)}`, key: 'Del', tip: '拆掉，退一半的錢',
         on: () => { world.removeBuilding(b, true); renderer.selected = null; } },
     ];
-    if (b.kind === BK.Barracks) cmds.push({ icon: '🚩', label: '集結點', tip: '再點地面設集結點（也可以直接右鍵點地面）', on: () => setTool('rally'), active: () => tool === 'rally' });
+    if (BUILDING_KINDS[b.kind].spawnCap) cmds.push({ icon: '🚩', label: '集結點', tip: '再點地面設集結點（也可以直接右鍵點地面）', on: () => setTool('rally'), active: () => tool === 'rally' });
     return cmds;
   },
 });
@@ -281,13 +299,14 @@ function lookAt(ids: number[]): void {
 const funcBar = new FuncBar([
   {
     id: 'build', icon: '🏗️', label: '建造',
-    items: () => TOOLS.filter((t) => t.id !== 'select').map((t): CardCmd => ({
-      icon: t.icon, label: t.label, key: t.key, debug: t.debug,
-      cost: t.building !== undefined ? BUILDING_KINDS[t.building].cost : undefined,
-      tip: t.building !== undefined ? `建造${t.label}（右鍵取消）` : t.label,
-      on: () => setTool(tool === t.id ? 'select' : t.id),
-      active: () => tool === t.id,
-    })),
+    // 第二層分類（data.ts 的 BUILD_CATS）＋最後一個「工具」放拆除和除錯用的
+    groups: [
+      ...BUILD_CATS.map((c) => ({
+        id: c.id, icon: c.icon, label: c.label,
+        items: () => c.kinds.map((kind) => toolCmd(TOOLS.find((t) => kind === 'road' ? t.id === 'road' : t.building === kind)!)),
+      })),
+      { id: 'tools', icon: '🧰', label: '工具', items: () => TOOLS.filter((t) => t.building === undefined && t.id !== 'select' && t.id !== 'road').map(toolCmd) },
+    ],
   },
   {
     id: 'army', icon: '⚔️', label: '部隊',
@@ -398,28 +417,31 @@ function rightClick(cx: number, cy: number, shift: boolean): void {
   if (army.rightClick(cx, cy, shift)) return;
   const b = renderer.selected;
   const p = renderer.cam.pick(cx, cy);
-  if (b && b.kind === BK.Barracks && p && !world.isSolid(Math.floor(p.x), Math.floor(p.z))) world.setRally(b, p.x, p.z);
+  if (b && BUILDING_KINDS[b.kind].spawnCap && p && !world.isSolid(Math.floor(p.x), Math.floor(p.z))) world.setRally(b, p.x, p.z);
 }
 
-function hoverTile(size: number): { tx: number; ty: number; x: number; y: number } | null {
+function hoverTile(size: number, hgt = size): { tx: number; ty: number; x: number; y: number } | null {
   const p = renderer.cam.pick(mouse.x, mouse.y);
   if (!p) return null;
-  return { tx: Math.floor(p.x - size / 2 + 0.5), ty: Math.floor(p.z - size / 2 + 0.5), x: p.x, y: p.z };
+  return { tx: Math.floor(p.x - size / 2 + 0.5), ty: Math.floor(p.z - hgt / 2 + 0.5), x: p.x, y: p.z };
 }
+
+/** 放長方形建築（城門）時按 R 轉 90 度 */
+let placeRot = false;
 
 function act(first: boolean): void {
   if (world.gameOver) return;
   const t = TOOLS.find((o) => o.id === tool);
   if (t && t.building !== undefined) {
-    const size = BUILDING_KINDS[t.building].size;
-    const h = hoverTile(size);
+    const [bw, bh] = world.dims(t.building, placeRot);
+    const h = hoverTile(bw, bh);
     if (!h) return;
     // 牆可以拖曳連續蓋；其他建築只在按下時蓋一次
     if (!first && t.building !== BK.Wall) return;
     const key = h.ty * world.map.w + h.tx;
     if (key === lastPaintTile) return;
     lastPaintTile = key;
-    const b = world.tryPlace(t.building, h.tx, h.ty);
+    const b = world.tryPlace(t.building, h.tx, h.ty, placeRot);
     if (b && t.building !== BK.Wall) { renderer.selected = b; army.setSelection([], false); }
     return;
   }
@@ -443,7 +465,7 @@ function act(first: boolean): void {
     case 'rally': {
       if (!first) return;
       const b = renderer.selected;
-      if (b && b.kind === BK.Barracks && !world.isSolid(h.tx, h.ty)) world.setRally(b, h.x, h.y);
+      if (b && BUILDING_KINDS[b.kind].spawnCap && !world.isSolid(h.tx, h.ty)) world.setRally(b, h.x, h.y);
       setTool('select');
       break;
     }
@@ -467,10 +489,10 @@ function updateGhost(): void {
     if (h) { renderer.setGhost(true, h.tx, h.ty, 1, world.canRoad(h.tx, h.ty) && world.canAfford(ECON.roadCost)); return; }
   }
   if (!t || t.building === undefined || !mouse.in) { renderer.setGhost(false); return; }
-  const k = BUILDING_KINDS[t.building];
-  const h = hoverTile(k.size);
+  const k = BUILDING_KINDS[t.building], [bw, bh] = world.dims(t.building, placeRot);
+  const h = hoverTile(bw, bh);
   if (!h) { renderer.setGhost(false); return; }
-  renderer.setGhost(true, h.tx, h.ty, k.size, world.canPlace(t.building, h.tx, h.ty) && world.canAfford(k.cost));
+  renderer.setGhost(true, h.tx, h.ty, bw, world.canPlace(t.building, h.tx, h.ty, placeRot) && world.canAfford(k.cost), bh);
 }
 
 // ---------------------------------------------------------------- 鍵盤
@@ -496,8 +518,11 @@ addEventListener('keydown', (e) => {
     if (k === 's') { army.command('stop'); return; }
     if (k === 'h') { army.command('hold'); return; }
   }
+  // 放長方形建築（城門）時：R 轉 90 度
+  const cur = TOOLS.find((o) => o.id === tool);
+  if (k === 'r' && cur?.building !== undefined) { placeRot = !placeRot; return; }
   const t = TOOLS.find((o) => o.key.toLowerCase() === k);
-  if (t) { setTool(t.id); if (t.id !== 'select') { funcBar.open = 'build'; funcBar.update(); } return; } // 按建造快捷鍵：功能表跟著打開「建造」
+  if (t) { setTool(t.id); if (t.id !== 'select') funcBar.show('build', toolGroup(t)); return; } // 按建造快捷鍵：功能表跟著打開「建造」
   if (k === 'escape') {
     // ESC：先取消「等待點地面的指令」或建造工具；沒有可以取消的就打開暫停選單
     if (army.mode) { army.mode = null; return; }

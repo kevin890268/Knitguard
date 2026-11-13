@@ -331,7 +331,7 @@ export class GameRenderer {
   }
 
   // ---------------------------------------------------------------- 每幀
-  setGhost(visible: boolean, tx = 0, ty = 0, size = 1, ok = true): void {
+  setGhost(visible: boolean, tx = 0, ty = 0, size = 1, ok = true, _h = size): void {
     this.ghost.visible = visible;
     if (!visible) return;
     this.ghost.scale.set(size, 1, size);
@@ -397,7 +397,8 @@ export class GameRenderer {
       const k = u.kind[i], kind = UNIT_KINDS[k], mesh = this.unitMeshes[k], n = counts[k]++;
       const x = u.px[i] + (u.x[i] - u.px[i]) * alpha;
       const y = u.py[i] + (u.y[i] - u.py[i]) * alpha;
-      const moving = u.vx[i] * u.vx[i] + u.vy[i] * u.vy[i] > 0.05;
+      const moving = u.vx[i] * u.vx[i] + u.vy[i] * u.vy[i] > 0.4 && (u.team[i] !== 0 || u.order[i] !== 0 || u.target[i] >= 0 ||
+        (u.homeX[i] - u.x[i]) ** 2 + (u.homeY[i] - u.y[i]) ** 2 > 0.8); // 真的在走路才跳
       // 走路一跳一跳；有輪子的器具用滑的
       const bob = moving && !kind.wheeled ? Math.abs(Math.sin(t * 12 + i)) * 0.12 * kind.scale : 0;
       const s = kind.scale;

@@ -85,6 +85,7 @@ export const UK = {
   Lancer: 4, Archer: 5, Catapult: 6, Horn: 7,
   Spineball: 8, Javelin: 9, Ballista: 10, Trapper: 11,
   DogCav: 12, Barker: 13, StBernard: 14,
+  PigHammer: 15, PigCrossbow: 16, PigGiant: 17, PigCatapult: 18,
 } as const;
 
 const P = Team.Player, L = Armor.Light, H = Armor.Heavy;
@@ -109,6 +110,12 @@ export const UNIT_KINDS: UnitKind[] = [
   { name: '狗狗騎兵', team: P, hp: 75, speed: 4.2, radius: 0.32, damage: 10, attackCd: 0.8, reach: 0.15, aggro: 6, reward: 0, color: 0xfffaf0, scale: 0.65, model: 'sheep', armor: L, meleeDef: 1 },
   { name: '吠叫兵', team: P, hp: 60, speed: 2.8, radius: 0.3, damage: 2, attackCd: 2.0, reach: 0.1, aggro: 5, reward: 0, color: 0xfffaf0, scale: 0.65, model: 'sheep', armor: L, range: 3, skill: { type: 'bark', radius: 3 } },
   { name: '聖伯納救援犬', team: P, hp: 90, speed: 2.4, radius: 0.36, damage: 0, attackCd: 1, reach: 0.1, aggro: 0, reward: 0, color: 0xfffaf0, scale: 0.75, model: 'sheep', armor: L, support: true, skill: { type: 'heal', radius: 5, amount: 12, cd: 1.5 } },
+  // ---- 豬人族（打贏後救回的良善豬人；豬族軍營會輪流訓練）。還沒有圖，暫用羊人的模型
+  // 槌頭兵：近戰，槌子打重甲有加成　弩兵：遠程，射程長、裝填慢、打重甲有加成　巨槌兵：大型重甲，單發高傷害　投石車：長程攻城
+  { name: '槌頭兵', team: P, hp: 120, speed: 2.0, radius: 0.33, damage: 11, attackCd: 1.0, reach: 0.15, aggro: 4.5, reward: 0, color: 0xf4b6c2, scale: 0.7, model: 'sheep', armor: L, meleeDef: 2, bonusHeavy: 6 },
+  { name: '弩兵', team: P, hp: 70, speed: 2.1, radius: 0.3, damage: 14, attackCd: 2.0, reach: 0.1, aggro: 8, reward: 0, color: 0xf4b6c2, scale: 0.66, model: 'sheep', armor: L, range: 6.5, bonusHeavy: 6, proj: 'arrow' },
+  { name: '巨槌兵', team: P, hp: 260, speed: 1.5, radius: 0.45, damage: 28, attackCd: 2.2, reach: 0.2, aggro: 4.5, reward: 0, color: 0xf4b6c2, scale: 0.95, model: 'sheep', armor: H, meleeDef: 4, rangedDef: 2, bonusHeavy: 12 },
+  { name: '豬人投石車', team: P, hp: 150, speed: 1.1, radius: 0.5, damage: 36, attackCd: 3.4, reach: 0.1, aggro: 10.5, reward: 0, color: 0xf4b6c2, scale: 1.1, model: 'sheep', armor: H, meleeDef: 1, rangedDef: 5, range: 9, bonusHeavy: 18, proj: 'stone', wheeled: true },
 ];
 
 export interface BuildingKind {
@@ -125,8 +132,13 @@ export interface BuildingKind {
   damage?: number;
   cd?: number;
   spawnCap?: number;
+  /** 軍營會訓練的兵種（輪流出），沒寫就是綿羊 */
+  trains?: number[];
   /** 去背好的建築圖：public/sprites/buildings/<sprite>_<等級>.png（沒有就用程式畫的） */
   sprite?: string;
+  /** 長方形建築的寬（x）和高（y）；沒寫就是 size × size。放置時可以轉 90 度 */
+  w?: number;
+  h?: number;
 }
 
 export const BK = {
@@ -137,7 +149,7 @@ export const BK = {
   // 各種族軍營（羊族軍營就是上面的 Barracks）
   CampSpiky: 22, CampDog: 23, CampBird: 24, CampTreant: 25, CampFish: 26, CampSpider: 27,
   CampWolf: 28, CampBull: 29, CampPig: 30,
-  StoneTower: 31, Gate: 32, Windmill: 33, Workshop: 34, CampDeer: 35,
+  StoneTower: 31, Gate: 32, Windmill: 33, Workshop: 34, CampDeer: 35, Sentry: 36,
 } as const;
 export const MAX_LEVEL = 3;
 
@@ -146,7 +158,8 @@ export const BUILDING_KINDS: BuildingKind[] = [
   { name: '世界樹市鎮中心', icon: '🌳', size: 3, hp: 2000, cost: 0, color: 0xf2a7b5, upgradeCost: [150, 300, 500, 800],
     levelNames: ['樹苗屋', '小樹屋', '繁榮樹城', '盟都', '永恆聖都'], sprite: 'town_center' },
   { name: '城牆', icon: '🧱', size: 1, hp: 250, cost: 4, color: 0xd9c4a0, upgradeCost: [6, 10], sprite: 'wall' },
-  { name: '箭塔', icon: '🏹', size: 1, hp: 180, cost: 35, color: 0x7fb6e0, upgradeCost: [40, 80], range: 6.5, damage: 10, cd: 0.6, sprite: 'archer_tower' },
+  // 箭塔 2x2：會射箭的防禦塔（圖：藍色那組，設定圖第二階段就叫「箭塔」）
+  { name: '箭塔', icon: '🏹', size: 2, hp: 360, cost: 45, color: 0x7fb6e0, upgradeCost: [50, 100], range: 7, damage: 12, cd: 0.6, sprite: 'watchtower' },
   { name: '羊族軍營', icon: '🐑', size: 2, hp: 400, cost: 60, color: 0xa9d494, upgradeCost: [60, 120], spawnCap: 3, sprite: 'barracks_sheep' },
   // ---- 新建築：目前只有圖（三個等級），功能和數值之後再定
   { name: '倉庫', icon: '📦', size: 2, hp: 400, cost: 50, color: 0xc9a27a, upgradeCost: [60, 120], sprite: 'warehouse' },
@@ -162,7 +175,7 @@ export const BUILDING_KINDS: BuildingKind[] = [
   { name: '教堂', icon: '⛪', size: 3, hp: 450, cost: 100, color: 0xd9d4c4, upgradeCost: [100, 200], sprite: 'church' },
   { name: '伐木場', icon: '🪓', size: 2, hp: 300, cost: 30, color: 0xc9a27a, upgradeCost: [40, 80], sprite: 'lumber' },
   { name: '採礦場', icon: '⛏️', size: 2, hp: 400, cost: 50, color: 0x9a9a9a, upgradeCost: [60, 120], sprite: 'mine' },
-  { name: '城堡', icon: '🏯', size: 3, hp: 1200, cost: 200, color: 0xd9d4c4, upgradeCost: [200, 400], sprite: 'castle' },
+  { name: '城堡', icon: '🏯', size: 4, hp: 1200, cost: 200, color: 0xd9d4c4, upgradeCost: [200, 400], sprite: 'castle' },
   { name: '墓園', icon: '🪦', size: 2, hp: 300, cost: 40, color: 0x9a9a9a, upgradeCost: [40, 80], sprite: 'cemetery' },
   { name: '木材加工廠', icon: '🪚', size: 2, hp: 350, cost: 60, color: 0xc9a27a, upgradeCost: [60, 120], sprite: 'woodworks' },
   { name: '木板場', icon: '🪵', size: 2, hp: 350, cost: 50, color: 0xc9a27a, upgradeCost: [50, 100], sprite: 'plankyard' },
@@ -176,14 +189,25 @@ export const BUILDING_KINDS: BuildingKind[] = [
   { name: '蛛人族軍營', icon: '🕷️', size: 2, hp: 400, cost: 60, color: 0xb59ad9, upgradeCost: [60, 120], sprite: 'barracks_spider' },
   { name: '狼人族軍營', icon: '🐺', size: 2, hp: 400, cost: 60, color: 0x9a9a9a, upgradeCost: [60, 120], sprite: 'barracks_wolf' },
   { name: '牛族軍營', icon: '🐂', size: 2, hp: 500, cost: 60, color: 0xc9a27a, upgradeCost: [60, 120], sprite: 'barracks_bull' },
-  { name: '豬族軍營', icon: '🐗', size: 2, hp: 450, cost: 60, color: 0xf2a7b5, upgradeCost: [60, 120], sprite: 'barracks_pig' },
-  // 石造高塔：設定圖標明 3x3（塔頂 2x2 可用空間，之後可以讓單位站上去）
+  { name: '豬族軍營', icon: '🐗', size: 2, hp: 450, cost: 60, color: 0xf2a7b5, upgradeCost: [60, 120], sprite: 'barracks_pig', spawnCap: 3, trains: [UK.PigHammer, UK.PigCrossbow, UK.PigGiant, UK.PigCatapult] },
+  // 高塔 3x3：塔頂 2x2 之後可以放單位（站上去射得更遠）
   { name: '高塔', icon: '🗼', size: 3, hp: 900, cost: 120, color: 0xd9d4c4, upgradeCost: [120, 240], sprite: 'stone_tower' },
-  // 城門：目前和牆一樣會擋路（之後做成我方可以通過、敵人要拆）
-  { name: '城門', icon: '🚪', size: 2, hp: 600, cost: 30, color: 0xd9d4c4, upgradeCost: [40, 80], sprite: 'gate' },
+  // 城門 1×3：中間 2 格寬的通道，我方靠近自動開門通過；敵人過不去，要拆門（放置時按 R 轉向）
+  { name: '城門', icon: '🚪', size: 3, w: 3, h: 1, hp: 600, cost: 30, color: 0xd9d4c4, upgradeCost: [40, 80], sprite: 'gate' },
   { name: '風車', icon: '🌬️', size: 2, hp: 300, cost: 50, color: 0xc9a27a, upgradeCost: [50, 100], sprite: 'windmill' },
   { name: '工程工坊', icon: '🛠️', size: 2, hp: 400, cost: 70, color: 0xc9a27a, upgradeCost: [70, 140], sprite: 'workshop' },
   { name: '鹿族軍營', icon: '🦌', size: 2, hp: 400, cost: 60, color: 0xa9d494, upgradeCost: [60, 120], sprite: 'barracks_deer' },
+  // 哨塔 1x1：小型瞭望台（功能之後再定，例如看得比較遠）
+  { name: '哨塔', icon: '🗼', size: 1, hp: 150, cost: 20, color: 0xc9a27a, upgradeCost: [25, 50], sprite: 'archer_tower' },
+];
+
+/** 建造選單的分類（第二層）；道路不是建築，放在「經濟」最前面（id 'road'） */
+export const BUILD_CATS: { id: string; icon: string; label: string; kinds: (number | 'road')[] }[] = [
+  { id: 'defense', icon: '🛡️', label: '防禦', kinds: [BK.Wall, BK.Gate, BK.Sentry, BK.Tower, BK.StoneTower, BK.Castle] },
+  { id: 'economy', icon: '🌾', label: '經濟', kinds: ['road', BK.Warehouse, BK.Granary, BK.Farm, BK.Windmill, BK.Lumber, BK.Nursery, BK.Mine, BK.Woodworks, BK.Plankyard, BK.Market, BK.Brewery] },
+  { id: 'life', icon: '🏠', label: '生活', kinds: [BK.House, BK.Tavern, BK.Church, BK.Cemetery, BK.Diplomacy, BK.Research] },
+  { id: 'military', icon: '⚔️', label: '軍事', kinds: [BK.Arsenal, BK.Workshop] },
+  { id: 'camps', icon: '🏕️', label: '種族軍營', kinds: [BK.Barracks, BK.CampSpiky, BK.CampDog, BK.CampBird, BK.CampTreant, BK.CampFish, BK.CampSpider, BK.CampWolf, BK.CampBull, BK.CampPig, BK.CampDeer] },
 ];
 
 /** 經濟 */
@@ -192,4 +216,5 @@ export const ECON = {
   passiveIncome: 1.5, // 每秒
   refundRatio: 0.5,
   roadCost: 1, // 每格道路
+  upgradeTime: 8, // 建築升級要花的秒數 × 目前等級（Lv1→2 要 8 秒、Lv2→3 要 16 秒）
 };

@@ -1,4 +1,4 @@
-import { Armor, BK, BUILDING_KINDS, Team, UNIT_KINDS, type UnitKind } from '../sim/data';
+import { Armor, BK, BUILDING_KINDS, Team, UK, UNIT_KINDS, type UnitKind } from '../sim/data';
 import { FORMATIONS, Ord } from '../sim/orders';
 import type { Building, World } from '../sim/world';
 import type { ArmyControl } from './army';
@@ -92,9 +92,10 @@ export class Hud {
       this.clearGrid('敵人：只能查看');
       this.card('enemy', () => []);
     } else if (b && !b.dead) {
+      // 建築：左＝狀態、中＝製作／建造／研究的進度、右＝可以按的按鈕
       this.buildingInfo(b);
-      this.clearGrid('');
-      this.card(`b${b.id}:${b.level}`, () => this.d.buildingCmds(b));
+      this.buildingWork(b);
+      this.card(`b${b.id}:${b.level}:${b.job ? 1 : 0}`, () => this.d.buildingCmds(b));
     } else {
       this.info.innerHTML = '<div class="empty">左鍵點選或框選部隊<br>點建築查看資訊</div>';
       this.clearGrid('');
@@ -155,18 +156,53 @@ export class Hud {
       `<div class="status">${status}</div></div>`;
   }
 
+  /** 左：建築狀態（圖、名稱等級、耐久、佔地、功能數值、目前狀態） */
   private buildingInfo(b: Building): void {
     const k = BUILDING_KINDS[b.kind], w = this.world, r = b.hp / b.maxHp;
-    const lines: string[] = [];
+    const lines: string[] = [`<span title="佔地">📐 ${b.w}×${b.h}</span>`];
+    let status = '';
     if (b.kind === BK.Tower) lines.push(`<span>⚔️ ${w.towerDamage(b).toFixed(0)} <small>/${k.cd}s</small></span>`, `<span>🏹 射程 ${w.towerRange(b).toFixed(1)}</span>`);
-    if (b.kind === BK.Barracks) lines.push(`<span>🐑 綿羊 ${b.units} / ${w.barracksCap(b)}</span>`, '<span>右鍵點地面：集結點</span>');
-    if (b.kind === BK.Base) lines.push('<span>被拆掉就輸了！</span>');
-    if (b.kind === BK.Wall) lines.push('<span>擋住怪物的路</span>');
+    if (k.spawnCap) {
+      const names = (k.trains ?? [UK.Sheep]).map((t) => UNIT_KINDS[t].name).join('、');
+      lines.push(`<span>🪖 士兵 ${b.units} / ${w.barracksCap(b)}</span>`, `<span>訓練：${names}</span>`);
+      status = '右鍵點地面：設集結點';
+    }
+    if (b.kind === BK.Base) status = '被拆掉就輸了！';
+    if (b.kind === BK.Wall) status = '擋住怪物的路';
+    if (b.kind === BK.Gate) status = b.open ? '🔓 開著：我方正在通過' : '🔒 關著（我方靠近自動開門，敵人靠近就關）';
+    if (b.kind === BK.StoneTower) status = '塔頂 2×2 之後可以放單位';
+    if (!status && !k.range && !k.spawnCap && b.kind !== BK.Base) status = '功能還沒做（目前只有外觀）';
+    if (b.job) status = `⏳ ${b.job.label}中…`;
+    const img = k.sprite ? `<img class="face" src="${import.meta.env.BASE_URL}sprites/buildings/${k.sprite}_${b.level}.png" alt="" />` : `<div class="face emoji">${k.icon}</div>`;
     this.info.innerHTML =
-      `<div class="pf"><div class="face emoji">${k.icon}</div></div>` +
-      `<div class="body"><div class="name">${k.name} <small>${k.levelNames ? `階段 ${'ⅠⅡⅢⅣⅤ'[b.level - 1]}・${k.levelNames[b.level - 1]}` : `Lv.${b.level}`}</small></div>` +
+      `<div class="pf">${img}</div>` +
+      `<div class="body"><div class="name">${k.icon} ${k.name} <small>${k.levelNames ? `階段 ${'ⅠⅡⅢⅣⅤ'[b.level - 1]}・${k.levelNames[b.level - 1]}` : `Lv.${b.level}`}</small></div>` +
       `<div class="hpbar"><i style="width:${(r * 100).toFixed(1)}%;background:${hpColor(r)}"></i><span>${Math.ceil(b.hp)} / ${b.maxHp}</span></div>` +
-      `<div class="stats">${lines.join('')}</div></div>`;
+      `<div class="stats">${lines.join('')}</div>` +
+      (status ? `<div class="status">${status}</div>` : '') + '</div>';
+  }
+
+  /** 中：製作／建造／研究的進度（升級、訓練士兵…）；沒有就顯示空的 */
+  private buildingWork(b: Building): void {
+    const w = this.world, rows: { icon: string; label: string; p: number; right: string; cancel?: boolean }[] = [];
+    if (b.job) rows.push({ icon: '⬆️', label: b.job.label, p: b.job.dur ? b.job.t / b.job.dur : 1, right: `${Math.max(0, Math.ceil(b.job.dur - b.job.t))} 秒`, cancel: true });
+    if (BUILDING_KINDS[b.kind].spawnCap) {
+      const cap = w.barracksCap(b), next = UNIT_KINDS[w.nextTrainee(b)].name;
+      rows.push(b.units < cap
+        ? { icon: '🪖', label: `訓練${next}（${b.units}/${cap}）`, p: 1 - Math.max(0, b.spawnT) / 5, right: `${Math.max(0, Math.ceil(b.spawnT))} 秒` }
+        : { icon: '🪖', label: `士兵已滿（${b.units}/${cap}）`, p: 1, right: '' });
+    }
+    const key = `work:${b.id}:` + rows.map((r) => r.label + r.right).join('|');
+    if (key === this.gridKey) return;
+    this.gridKey = key;
+    $('selGrid').innerHTML = rows.length
+      ? '<div class="work">' + rows.map((r) =>
+        `<div class="job"><span class="ico">${r.icon}</span><div class="jb"><div class="jl">${r.label}<small>${r.right}</small></div>` +
+        `<div class="jp"><i style="width:${(Math.min(1, r.p) * 100).toFixed(0)}%"></i></div></div>` +
+        (r.cancel ? '<button class="jc" title="取消（全額退錢）">✖</button>' : '') + '</div>').join('') + '</div>'
+      : '<div class="hint">沒有進行中的工作<br><small>製作／建造／研究會顯示在這裡</small></div>';
+    const c = $('selGrid').querySelector<HTMLButtonElement>('.jc');
+    if (c) c.onclick = () => { w.cancelJob(b); this.invalidate(); this.update(); };
   }
 
   // ---------------------------------------------------------------- 中：編隊與選取格子

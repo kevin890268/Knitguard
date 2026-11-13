@@ -67,7 +67,7 @@ export class Renderer2D {
   private rockSprites: Sprite[] = [];
   private props: Prop[] = [];
   private chunks = new Map<number, HTMLCanvasElement>();
-  private ghost = { visible: false, tx: 0, ty: 0, size: 1, ok: true };
+  private ghost = { visible: false, tx: 0, ty: 0, size: 1, h: 1, ok: true };
   private dpr = 1;
   private drawn = 0;
   private knitPattern: HTMLCanvasElement;
@@ -201,7 +201,7 @@ export class Renderer2D {
       const ims = await Promise.all(Array.from({ length: levels }, (_, i) => loadImage(`${import.meta.env.BASE_URL}sprites/buildings/${k.sprite}_${i + 1}.png`)));
       // 其他建築：最高等級的寬度 = 佔地菱形寬 × 1.3，低等級照原圖比例縮小（設定圖大小不一，用佔地統一）
       const maxW = Math.max(1, ...ims.map((im) => im?.naturalWidth ?? 0));
-      const fit = (k.size * TILE_W * 1.3) / maxW;
+      const fit = ((((k.w ?? k.size) + (k.h ?? k.size)) / 2) * TILE_W * 1.3) / maxW; // 長方形用佔地菱形的平均寬
       ims.forEach((im, li) => {
         const lv = li + 1;
         if (!im) return;
@@ -319,8 +319,9 @@ export class Renderer2D {
     return this.unitSprites[kind]?.[1]?.canvas ?? null;
   }
 
-  setGhost(visible: boolean, tx = 0, ty = 0, size = 1, ok = true): void {
-    Object.assign(this.ghost, { visible, tx, ty, size, ok });
+  /** 建造預覽；size＝寬，h＝高（長方形的城門），沒給 h 就是正方形 */
+  setGhost(visible: boolean, tx = 0, ty = 0, size = 1, ok = true, h = size): void {
+    Object.assign(this.ghost, { visible, tx, ty, size, h, ok });
   }
 
   drawStats(): string {
@@ -398,13 +399,15 @@ export class Renderer2D {
       items.push({ k: p.x + p.y, draw: () => this.drawSprite(g, p.sprite, sx, sy, p.scale, p.flip) });
     }
     for (const b of w.buildings) {
-      const cx = b.tx + b.size / 2, cy = b.ty + b.size / 2;
+      const cx = b.tx + b.w / 2, cy = b.ty + b.h / 2, half = (b.w + b.h) / 4;
       const [sx, sy0] = toScreen(cx, cy);
       if (!onScreen(sx, sy0, 200)) continue;
       const sy = sy0 + (b.hitT > 0 ? 2 : 0); // 被打時輕微下沉
       const sp = this.buildingSprite(b);
-      shadows.push([sx, sy0, b.size * 0.55]);
-      items.push({ k: cx + cy + b.size * 0.3, draw: () => { this.drawSprite(g, sp, sx, sy, 1, false); this.drawBar(g, b, sx, sy - sp.top - 8); } });
+      shadows.push([sx, sy0, half * 1.1]);
+      // 城門的圖是沿 x 方向（3×1）；轉成 1×3 時左右翻過來
+      const flip = b.h > b.w;
+      items.push({ k: cx + cy + half * 0.6, draw: () => { this.drawSprite(g, sp, sx, sy, 1, flip); this.drawBar(g, b, sx, sy - sp.top - 8); } });
     }
     const u = w.units, t = w.time, sel = this.unitSel;
     const bars: [number, number, number][] = [];
@@ -415,7 +418,9 @@ export class Renderer2D {
       const [sx, sy] = toScreen(x, y);
       if (!onScreen(sx, sy, 40)) continue;
       const k = u.kind[i], kind = UNIT_KINDS[k];
-      const moving = u.vx[i] * u.vx[i] + u.vy[i] * u.vy[i] > 0.05;
+      // 真的在走路才跳：速度要夠快；我方還要有指令、在追敵人或離崗位夠遠（站著被推擠不算）
+      const moving = u.vx[i] * u.vx[i] + u.vy[i] * u.vy[i] > 0.4 && (u.team[i] !== 0 || u.order[i] !== 0 || u.target[i] >= 0 ||
+        (u.homeX[i] - u.x[i]) ** 2 + (u.homeY[i] - u.y[i]) ** 2 > 0.8);
       // 走路一跳一跳；有輪子的器具用滑的
       const bob = moving && !kind.wheeled ? Math.abs(Math.sin(t * 12 + i)) * 0.12 * kind.scale : 0;
       const dir = ((Math.round(u.face[i] / ((Math.PI * 2) / DIRS)) % DIRS) + DIRS) % DIRS;
@@ -543,8 +548,8 @@ export class Renderer2D {
     g.beginPath(); g.moveTo(bx, by); g.lineTo(rx, ry); g.lineTo(rx, ry + d); g.lineTo(bx, by + d); g.closePath(); g.fill();
   }
 
-  private diamond(g: CanvasRenderingContext2D, tx: number, ty: number, size: number): void {
-    const a = toScreen(tx, ty), b = toScreen(tx + size, ty), c = toScreen(tx + size, ty + size), d = toScreen(tx, ty + size);
+  private diamond(g: CanvasRenderingContext2D, tx: number, ty: number, size: number, h = size): void {
+    const a = toScreen(tx, ty), b = toScreen(tx + size, ty), c = toScreen(tx + size, ty + h), d = toScreen(tx, ty + h);
     g.beginPath(); g.moveTo(a[0], a[1]); g.lineTo(b[0], b[1]); g.lineTo(c[0], c[1]); g.lineTo(d[0], d[1]); g.closePath();
   }
 
@@ -597,7 +602,7 @@ export class Renderer2D {
   private drawGroundMarks(g: CanvasRenderingContext2D): void {
     const gh = this.ghost;
     if (gh.visible) {
-      this.diamond(g, gh.tx, gh.ty, gh.size);
+      this.diamond(g, gh.tx, gh.ty, gh.size, gh.h);
       g.fillStyle = gh.ok ? 'rgba(102,255,102,0.35)' : 'rgba(255,85,85,0.35)';
       g.fill();
       g.strokeStyle = gh.ok ? '#4c4' : '#d44';
@@ -608,7 +613,7 @@ export class Renderer2D {
     if (sel && sel.dead) this.selected = null;
     if (!this.selected) return;
     const s = this.selected;
-    this.diamond(g, s.tx, s.ty, s.size);
+    this.diamond(g, s.tx, s.ty, s.w, s.h);
     g.strokeStyle = '#ffd54a';
     g.lineWidth = 3;
     g.stroke();
@@ -626,7 +631,7 @@ export class Renderer2D {
   /** 物件之上的標記：集結旗 */
   private drawSelectionTop(g: CanvasRenderingContext2D): void {
     const s = this.selected;
-    if (!s || s.kind !== BK.Barracks) return;
+    if (!s || !BUILDING_KINDS[s.kind].spawnCap) return;
     const [fx, fy] = toScreen(s.rallyX, s.rallyY);
     g.strokeStyle = '#6b4a2a'; g.lineWidth = 2;
     g.beginPath(); g.moveTo(fx, fy); g.lineTo(fx, fy - 34); g.stroke();
