@@ -110,6 +110,23 @@ function setupShowcase(w: World): void {
       if (x !== px + 1 || y !== py + 1) w.tryPlace(BK.Wall, x, y);
     }
   w.spawnUnitAt(UK.Sheep, px + 1.5, py + 1.5);
+  // 市鎮中心右邊：其他四個階段（原本的市鎮中心是階段 1）
+  const bx = w.map.baseX;
+  for (let y = by - 2; y <= by + 3; y++)
+    for (let x = bx + 3; x < Math.min(mw - 1, bx + 26); x++) w.map.tiles[y * mw + x] = Tile.Grass;
+  for (let s = 2; s <= 5; s++) {
+    const b = w.tryPlace(BK.Base, bx + 5 * (s - 1), by);
+    if (b) { b.level = s; w.buildingsVersion++; }
+  }
+  // 圍羊的牆左邊：城牆三個等級各一小段
+  for (let lv = 1; lv <= 3; lv++)
+    for (let k = 0; k < 3; k++) {
+      const x = px - 4 * lv, y = py + k;
+      if (!w.map.inBounds(x, y)) continue;
+      w.map.tiles[y * mw + x] = Tile.Grass;
+      const b = w.tryPlace(BK.Wall, x, y);
+      if (b) { b.level = lv; w.buildingsVersion++; }
+    }
 }
 
 function setupWorld(w: World): void {
