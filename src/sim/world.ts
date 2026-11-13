@@ -63,6 +63,11 @@ export class World {
   readonly hash: SpatialHash;
   readonly flow: FlowField;
   readonly occ: Int32Array; // 每格的建築 id，-1 = 無
+  /** 道路（1 = 有）：不擋路，建築的人從旁邊的道路進出 */
+  readonly roads: Uint8Array;
+  roadsVersion = 0;
+  /** 我方單位走得到的格子（從市鎮中心往外），走不到 = 被關住 */
+  readonly reach: Uint8Array;
   readonly byId = new Map<number, Building>();
   buildings: Building[] = [];
   base: Building;
@@ -116,6 +121,8 @@ export class World {
     this.hash = new SpatialHash(size, size, 1.25, MAX_UNITS);
     this.flow = new FlowField(size, size);
     this.occ = new Int32Array(size * size).fill(-1);
+    this.roads = new Uint8Array(size * size);
+    this.reach = new Uint8Array(size * size);
     this.costs = new Float32Array(size * size);
     this.pathCosts = new Float32Array(size * size);
     this.base = this.addBuilding(BK.Base, this.map.baseX, this.map.baseY);
@@ -218,13 +225,100 @@ export class World {
   }
 
   // ---------------------------------------------------------------- 建築
+  /**
+   * 蓋建築的條件：
+   *  1. 佔地內是空的草地（不能蓋在道路上）
+   *  2. 建築（2x2 以上）一定要留至少一個「出入口」：旁邊有一格不是其他建築
+   *  3. 蓋下去不能把旁邊建築的最後一個出入口堵住
+   */
   canPlace(kind: number, tx: number, ty: number): boolean {
-    const s = BUILDING_KINDS[kind].size;
+    const s = BUILDING_KINDS[kind].size, w = this.map.w;
     for (let y = ty; y < ty + s; y++)
       for (let x = tx; x < tx + s; x++) {
-        if (!this.map.inBounds(x, y) || this.map.solidTerrain(x, y) || this.occ[y * this.map.w + x] >= 0) return false;
+        if (!this.map.inBounds(x, y) || this.map.solidTerrain(x, y) || this.occ[y * w + x] >= 0 || this.roads[y * w + x]) return false;
+      }
+    const block = { tx, ty, s };
+    if (s >= 2 && this.exits(tx, ty, s, block) === 0) return false;
+    // 旁邊的建築（2x2 以上）還有沒有出入口
+    const seen = new Set<number>();
+    for (let y = ty - 1; y <= ty + s; y++)
+      for (let x = tx - 1; x <= tx + s; x++) {
+        if (!this.map.inBounds(x, y)) continue;
+        const id = this.occ[y * w + x];
+        if (id < 0 || seen.has(id)) continue;
+        seen.add(id);
+        const b = this.byId.get(id)!;
+        if (b.size >= 2 && this.exits(b.tx, b.ty, b.size, block) === 0) return false;
       }
     return true;
+  }
+
+  /** 建築四邊（不含斜角）可以進出的格子數；block＝假裝這塊也蓋了東西 */
+  private exits(tx: number, ty: number, s: number, block?: { tx: number; ty: number; s: number }): number {
+    let n = 0;
+    const free = (x: number, y: number) => {
+      if (this.isSolid(x, y)) return false;
+      return !(block && x >= block.tx && x < block.tx + block.s && y >= block.ty && y < block.ty + block.s);
+    };
+    for (let i = 0; i < s; i++) {
+      if (free(tx + i, ty - 1)) n++;
+      if (free(tx + i, ty + s)) n++;
+      if (free(tx - 1, ty + i)) n++;
+      if (free(tx + s, ty + i)) n++;
+    }
+    return n;
+  }
+
+  /**
+   * 建築的出入口：旁邊的道路優先（離 (nx, ny) 最近的），沒有道路就用旁邊的空地。回傳格子中心；完全被堵住回傳 null
+   */
+  exitPoint(b: Building, nx: number, ny: number): [number, number] | null {
+    let best: [number, number] | null = null, bestScore = Infinity;
+    const s = b.size;
+    const check = (x: number, y: number) => {
+      if (this.isSolid(x, y)) return;
+      const d = Math.hypot(x + 0.5 - nx, y + 0.5 - ny) + (this.roads[y * this.map.w + x] ? 0 : 1000);
+      if (d < bestScore) { bestScore = d; best = [x + 0.5, y + 0.5]; }
+    };
+    for (let i = 0; i < s; i++) {
+      check(b.tx + i, b.ty - 1); check(b.tx + i, b.ty + s);
+      check(b.tx - 1, b.ty + i); check(b.tx + s, b.ty + i);
+    }
+    return best;
+  }
+
+  // ---------------------------------------------------------------- 道路
+  /** 道路：只鋪在空草地上，不擋路；建築的人從旁邊的道路進出 */
+  canRoad(tx: number, ty: number): boolean {
+    if (!this.map.inBounds(tx, ty) || this.map.solidTerrain(tx, ty)) return false;
+    const i = ty * this.map.w + tx;
+    return this.occ[i] < 0 && !this.roads[i];
+  }
+
+  placeRoad(tx: number, ty: number): boolean {
+    if (!this.canRoad(tx, ty) || !this.canAfford(ECON.roadCost)) return false;
+    if (!this.freeBuild) this.gold -= ECON.roadCost;
+    this.roads[ty * this.map.w + tx] = 1;
+    this.roadsVersion++;
+    return true;
+  }
+
+  removeRoad(tx: number, ty: number): boolean {
+    if (!this.map.inBounds(tx, ty)) return false;
+    const i = ty * this.map.w + tx;
+    if (!this.roads[i]) return false;
+    this.roads[i] = 0;
+    this.roadsVersion++;
+    return true;
+  }
+
+  /** 我方單位被建築或地形關在中間（走不到市鎮中心）→ 畫面上顯示「無法移動」 */
+  isTrapped(i: number): boolean {
+    const u = this.units;
+    const tx = Math.floor(u.x[i]), ty = Math.floor(u.y[i]);
+    if (!this.map.inBounds(tx, ty)) return false;
+    const k = ty * this.map.w + tx;
+    return this.occ[k] < 0 && !this.reach[k];
   }
 
   canAfford(cost: number): boolean {
@@ -358,7 +452,30 @@ export class World {
     // 玩家部隊的路徑：建築擋路 → 蓋了或拆了建築就重算
     for (let i = 0; i < n; i++) this.pathCosts[i] = this.map.tiles[i] === Tile.Grass && this.occ[i] < 0 ? 1 : Infinity;
     for (const p of this.paths) if (p) p.field.compute(this.pathCosts, p.goals);
+    this.computeReach();
     this.flowDirty = false;
+  }
+
+  /** 從市鎮中心旁邊的空地往外走得到的格子（我方單位能走的區域）；走不到的地方 = 被關住 */
+  private computeReach(): void {
+    const w = this.map.w, reach = this.reach, b = this.base;
+    reach.fill(0);
+    const q: number[] = [];
+    for (let y = b.ty - 1; y <= b.ty + b.size; y++)
+      for (let x = b.tx - 1; x <= b.tx + b.size; x++) {
+        if (!this.map.inBounds(x, y) || this.isSolid(x, y)) continue;
+        reach[y * w + x] = 1; q.push(y * w + x);
+      }
+    while (q.length) {
+      const i = q.pop()!, x = i % w, y = (i / w) | 0;
+      for (let k = 0; k < 4; k++) {
+        const nx = x + (k === 0 ? 1 : k === 1 ? -1 : 0), ny = y + (k === 2 ? 1 : k === 3 ? -1 : 0);
+        if (!this.map.inBounds(nx, ny)) continue;
+        const j = ny * w + nx;
+        if (reach[j] || this.pathCosts[j] === Infinity) continue;
+        reach[j] = 1; q.push(j);
+      }
+    }
   }
 
   // ---------------------------------------------------------------- 部隊指令（參考世紀帝國 4，見 orders.ts）
@@ -1005,11 +1122,10 @@ export class World {
         b.spawnT -= dt;
         if (b.spawnT > 0) continue;
         b.spawnT = 5;
-        // 從建築邊緣靠近集結點的位置出兵
-        const m = 0.45;
-        const sx = Math.max(b.tx - m, Math.min(b.rallyX, b.tx + b.size + m));
-        const sy = Math.max(b.ty - m, Math.min(b.rallyY, b.ty + b.size + m));
-        const i = u.spawn(UK.Sheep, sx, sy, b.id);
+        // 從建築旁邊的道路出來（沒有道路就走旁邊的空地；完全堵住就不出兵）
+        const ex = this.exitPoint(b, b.rallyX, b.rallyY);
+        if (!ex) continue;
+        const i = u.spawn(UK.Sheep, ex[0], ex[1], b.id);
         if (i >= 0) {
           this.applySheepLevel(i, b.level, true);
           u.homeX[i] = b.rallyX + this.rng.range(-0.8, 0.8);

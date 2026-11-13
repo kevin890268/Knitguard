@@ -125,18 +125,65 @@ export interface BuildingKind {
   damage?: number;
   cd?: number;
   spawnCap?: number;
+  /** 去背好的建築圖：public/sprites/buildings/<sprite>_<等級>.png（沒有就用程式畫的） */
+  sprite?: string;
 }
 
-export const BK = { Base: 0, Wall: 1, Tower: 2, Barracks: 3 } as const;
+export const BK = {
+  Base: 0, Wall: 1, Tower: 2, Barracks: 3,
+  Warehouse: 4, House: 5, Granary: 6, Arsenal: 7, Farm: 8, Research: 9,
+  Brewery: 10, Tavern: 11, Nursery: 12, Market: 13, Church: 14, Lumber: 15, Mine: 16,
+  Castle: 17, Cemetery: 18, Woodworks: 19, Plankyard: 20, Diplomacy: 21,
+  // 各種族軍營（羊族軍營就是上面的 Barracks）
+  CampSpiky: 22, CampDog: 23, CampBird: 24, CampTreant: 25, CampFish: 26, CampSpider: 27,
+  CampWolf: 28, CampBull: 29, CampPig: 30,
+  StoneTower: 31, Gate: 32, Windmill: 33, Workshop: 34, CampDeer: 35,
+} as const;
 export const MAX_LEVEL = 3;
 
 export const BUILDING_KINDS: BuildingKind[] = [
   // 世界樹・聯盟市鎮中心：五個階段（美術在 public/sprites/buildings/town_center_<階段>.png）
   { name: '世界樹市鎮中心', icon: '🌳', size: 3, hp: 2000, cost: 0, color: 0xf2a7b5, upgradeCost: [150, 300, 500, 800],
-    levelNames: ['樹苗屋', '小樹屋', '繁榮樹城', '盟都', '永恆聖都'] },
-  { name: '毛氈牆', icon: '🧱', size: 1, hp: 250, cost: 4, color: 0xd9c4a0, upgradeCost: [6, 10] },
-  { name: '線軸箭塔', icon: '🧵', size: 1, hp: 180, cost: 35, color: 0x7fb6e0, upgradeCost: [40, 80], range: 6.5, damage: 10, cd: 0.6 },
-  { name: '羊圈', icon: '🐑', size: 2, hp: 400, cost: 60, color: 0xa9d494, upgradeCost: [60, 120], spawnCap: 3 },
+    levelNames: ['樹苗屋', '小樹屋', '繁榮樹城', '盟都', '永恆聖都'], sprite: 'town_center' },
+  { name: '城牆', icon: '🧱', size: 1, hp: 250, cost: 4, color: 0xd9c4a0, upgradeCost: [6, 10], sprite: 'wall' },
+  { name: '箭塔', icon: '🏹', size: 1, hp: 180, cost: 35, color: 0x7fb6e0, upgradeCost: [40, 80], range: 6.5, damage: 10, cd: 0.6, sprite: 'archer_tower' },
+  { name: '羊族軍營', icon: '🐑', size: 2, hp: 400, cost: 60, color: 0xa9d494, upgradeCost: [60, 120], spawnCap: 3, sprite: 'barracks_sheep' },
+  // ---- 新建築：目前只有圖（三個等級），功能和數值之後再定
+  { name: '倉庫', icon: '📦', size: 2, hp: 400, cost: 50, color: 0xc9a27a, upgradeCost: [60, 120], sprite: 'warehouse' },
+  { name: '房屋', icon: '🏠', size: 2, hp: 300, cost: 30, color: 0xc9a27a, upgradeCost: [40, 80], sprite: 'house' },
+  { name: '穀倉', icon: '🌾', size: 2, hp: 350, cost: 50, color: 0xc9a27a, upgradeCost: [60, 120], sprite: 'granary' },
+  { name: '兵工廠', icon: '⚒️', size: 2, hp: 450, cost: 80, color: 0xc9a27a, upgradeCost: [80, 160], sprite: 'arsenal' },
+  { name: '農場', icon: '🚜', size: 2, hp: 250, cost: 40, color: 0xa9d494, upgradeCost: [40, 80], sprite: 'farm' },
+  { name: '魔法研究院', icon: '🔮', size: 2, hp: 350, cost: 100, color: 0xb59ad9, upgradeCost: [100, 200], sprite: 'research' },
+  { name: '釀酒廠', icon: '🍺', size: 2, hp: 350, cost: 60, color: 0xc9a27a, upgradeCost: [60, 120], sprite: 'brewery' },
+  { name: '酒館', icon: '🍻', size: 2, hp: 300, cost: 50, color: 0xc9a27a, upgradeCost: [50, 100], sprite: 'tavern' },
+  { name: '植樹場', icon: '🌲', size: 2, hp: 250, cost: 40, color: 0xa9d494, upgradeCost: [40, 80], sprite: 'nursery' },
+  { name: '市場', icon: '⚖️', size: 3, hp: 400, cost: 80, color: 0xc9a27a, upgradeCost: [80, 160], sprite: 'market' },
+  { name: '教堂', icon: '⛪', size: 3, hp: 450, cost: 100, color: 0xd9d4c4, upgradeCost: [100, 200], sprite: 'church' },
+  { name: '伐木場', icon: '🪓', size: 2, hp: 300, cost: 30, color: 0xc9a27a, upgradeCost: [40, 80], sprite: 'lumber' },
+  { name: '採礦場', icon: '⛏️', size: 2, hp: 400, cost: 50, color: 0x9a9a9a, upgradeCost: [60, 120], sprite: 'mine' },
+  { name: '城堡', icon: '🏯', size: 3, hp: 1200, cost: 200, color: 0xd9d4c4, upgradeCost: [200, 400], sprite: 'castle' },
+  { name: '墓園', icon: '🪦', size: 2, hp: 300, cost: 40, color: 0x9a9a9a, upgradeCost: [40, 80], sprite: 'cemetery' },
+  { name: '木材加工廠', icon: '🪚', size: 2, hp: 350, cost: 60, color: 0xc9a27a, upgradeCost: [60, 120], sprite: 'woodworks' },
+  { name: '木板場', icon: '🪵', size: 2, hp: 350, cost: 50, color: 0xc9a27a, upgradeCost: [50, 100], sprite: 'plankyard' },
+  { name: '外交館', icon: '🤝', size: 3, hp: 400, cost: 120, color: 0xf2a7b5, upgradeCost: [120, 240], sprite: 'diplomacy' },
+  // ---- 各種族軍營：目前只有圖，出兵之後再做
+  { name: '刺刺族軍營', icon: '🦔', size: 2, hp: 450, cost: 60, color: 0xc9a27a, upgradeCost: [60, 120], sprite: 'barracks_spiky' },
+  { name: '狗族軍營', icon: '🐕', size: 2, hp: 400, cost: 60, color: 0xc9a27a, upgradeCost: [60, 120], sprite: 'barracks_dog' },
+  { name: '鳥人族軍營', icon: '🦅', size: 2, hp: 400, cost: 60, color: 0xc9a27a, upgradeCost: [60, 120], sprite: 'barracks_bird' },
+  { name: '樹人族軍營', icon: '🌳', size: 2, hp: 450, cost: 60, color: 0xa9d494, upgradeCost: [60, 120], sprite: 'barracks_treant' },
+  { name: '魚人族軍營', icon: '🐟', size: 2, hp: 400, cost: 60, color: 0x7fb6e0, upgradeCost: [60, 120], sprite: 'barracks_fish' },
+  { name: '蛛人族軍營', icon: '🕷️', size: 2, hp: 400, cost: 60, color: 0xb59ad9, upgradeCost: [60, 120], sprite: 'barracks_spider' },
+  { name: '狼人族軍營', icon: '🐺', size: 2, hp: 400, cost: 60, color: 0x9a9a9a, upgradeCost: [60, 120], sprite: 'barracks_wolf' },
+  { name: '牛族軍營', icon: '🐂', size: 2, hp: 500, cost: 60, color: 0xc9a27a, upgradeCost: [60, 120], sprite: 'barracks_bull' },
+  { name: '豬族軍營', icon: '🐗', size: 2, hp: 450, cost: 60, color: 0xf2a7b5, upgradeCost: [60, 120], sprite: 'barracks_pig' },
+  // 石造高塔：設定圖標明 3x3（塔頂 2x2 可用空間，之後可以讓單位站上去）
+  { name: '高塔', icon: '🗼', size: 3, hp: 900, cost: 120, color: 0xd9d4c4, upgradeCost: [120, 240], sprite: 'stone_tower' },
+  // 城門：目前和牆一樣會擋路（之後做成我方可以通過、敵人要拆）
+  { name: '城門', icon: '🚪', size: 2, hp: 600, cost: 30, color: 0xd9d4c4, upgradeCost: [40, 80], sprite: 'gate' },
+  { name: '風車', icon: '🌬️', size: 2, hp: 300, cost: 50, color: 0xc9a27a, upgradeCost: [50, 100], sprite: 'windmill' },
+  { name: '工程工坊', icon: '🛠️', size: 2, hp: 400, cost: 70, color: 0xc9a27a, upgradeCost: [70, 140], sprite: 'workshop' },
+  { name: '鹿族軍營', icon: '🦌', size: 2, hp: 400, cost: 60, color: 0xa9d494, upgradeCost: [60, 120], sprite: 'barracks_deer' },
 ];
 
 /** 經濟 */
@@ -144,4 +191,5 @@ export const ECON = {
   startGold: 250,
   passiveIncome: 1.5, // 每秒
   refundRatio: 0.5,
+  roadCost: 1, // 每格道路
 };

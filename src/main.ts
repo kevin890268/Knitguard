@@ -5,7 +5,8 @@ import { isTyping } from './render/camera';
 import { makeCutout } from './render/art/imageTo3d';
 import { GameRenderer } from './render/renderer';
 import { Renderer2D } from './render2d/renderer2d';
-import { BK, BUILDING_KINDS, UK, UNIT_KINDS } from './sim/data';
+import { BK, BUILDING_KINDS, ECON, UK, UNIT_KINDS } from './sim/data';
+import { Tile } from './sim/map';
 import { MAX_UNITS, World } from './sim/world';
 import { ArmyControl } from './ui/army';
 import { Hud, type CardCmd } from './ui/hud';
@@ -18,13 +19,16 @@ export type AnyRenderer = GameRenderer | Renderer2D;
 
 // ---------------------------------------------------------------- 工具列定義
 // 數字鍵留給編隊、A/S/H/R 留給部隊指令（參考世紀帝國 4），建造改用 Z/T/B
-type ToolId = 'select' | 'wall' | 'tower' | 'barracks' | 'erase' | 'rally' | 'sheep' | 'enemy';
+type ToolId = string; // 'select' | 'wall' | 'road' | 'erase' | 'rally' | 'sheep' | 'enemy' | 'b<建築種類>'
 interface Tool { id: ToolId; key: string; icon: string; label: string; building?: number; debug?: boolean; }
+const KEYED: Record<number, string> = { [BK.Wall]: 'Z', [BK.Tower]: 'T', [BK.Barracks]: 'B' };
 const TOOLS: Tool[] = [
   { id: 'select', key: 'Esc', icon: '👆', label: '選取' },
-  { id: 'wall', key: 'Z', icon: '🧱', label: '毛氈牆', building: BK.Wall },
-  { id: 'tower', key: 'T', icon: '🧵', label: '線軸箭塔', building: BK.Tower },
-  { id: 'barracks', key: 'B', icon: '🐑', label: '羊圈', building: BK.Barracks },
+  { id: 'road', key: 'G', icon: '🟫', label: '道路' },
+  // 每種建築一個（市鎮中心除外）；牆、箭塔、羊族軍營有快捷鍵
+  ...BUILDING_KINDS.map((k, kind): Tool | null => kind === BK.Base ? null
+    : { id: kind === BK.Wall ? 'wall' : `b${kind}`, key: KEYED[kind] ?? '', icon: k.icon, label: k.name, building: kind })
+    .filter((t): t is Tool => t !== null),
   { id: 'erase', key: 'X', icon: '✂️', label: '拆除' },
   { id: 'sheep', key: 'N', icon: '🐏', label: '放綿羊', debug: true },
   { id: 'enemy', key: 'M', icon: '👾', label: '放怪物', debug: true },
@@ -76,7 +80,40 @@ const DEMO = {
 };
 let started = false;
 
+/** 建築展示（預設）：沒有單位、沒有怪物；市鎮中心五個階段排一排，其他建築每種三個等級。網址加 ?units 回到兵種 DEMO */
+const UNIT_DEMO = new URLSearchParams(location.search).has('units');
+function setupShowcase(w: World): void {
+  w.autoWaves = false;
+  w.freeBuild = true;
+  const { w: mw, h: mh } = w.map, by = w.map.baseY;
+  // 展示區清成草地（樹和石頭會擋住建築）
+  for (let y = by + 4; y < mh - 1; y++)
+    for (let x = 1; x < mw - 1; x++) w.map.tiles[y * mw + x] = Tile.Grass;
+  // 每種建築一組（等級 1、2、3 排一排），一排 7 組；每排建築的下緣貼著一條橫向道路
+  const kinds = BUILDING_KINDS.map((_, i) => i).filter((k) => k !== BK.Base && k !== BK.Wall);
+  kinds.forEach((kind, n) => {
+    const s = BUILDING_KINDS[kind].size;
+    const row = Math.floor(n / 7), x0 = 3 + 13 * (n % 7), roadY = by + 8 + 5 * row;
+    for (let lv = 1; lv <= 3; lv++) {
+      const b = w.tryPlace(kind, x0 + 4 * (lv - 1), roadY - s);
+      if (b) { b.level = lv; w.buildingsVersion++; }
+    }
+  });
+  const rows = Math.ceil(kinds.length / 7);
+  for (let r = 0; r < rows; r++) for (let x = 2; x < mw - 2; x++) w.placeRoad(x, by + 8 + 5 * r);
+  // 市鎮中心旁邊：用牆圍住一隻綿羊，示範「無法移動」
+  const px = w.map.baseX - 6, py = by;
+  for (let y = py; y <= py + 2; y++)
+    for (let x = px; x <= px + 2; x++) {
+      if (!w.map.inBounds(x, y)) continue;
+      w.map.tiles[y * mw + x] = Tile.Grass;
+      if (x !== px + 1 || y !== py + 1) w.tryPlace(BK.Wall, x, y);
+    }
+  w.spawnUnitAt(UK.Sheep, px + 1.5, py + 1.5);
+}
+
 function setupWorld(w: World): void {
+  if (!UNIT_DEMO) { setupShowcase(w); return; }
   w.victoryWave = DEMO.waves.length;
   w.waveSizes = DEMO.waves;
   w.waveMix = DEMO.mix;
@@ -99,6 +136,7 @@ function setupWorld(w: World): void {
   }
 }
 setupWorld(world);
+renderer.setWorld(world); // 展示區清過地形，重建樹和石頭
 
 function newWorld(seed?: number): void {
   world = new World(seed ?? Math.floor(Math.random() * 1e6));
@@ -155,6 +193,7 @@ $('titleStart').onclick = () => {
   $('title').style.display = 'none';
   started = true;
 };
+if (!UNIT_DEMO) $('titleStart').click(); // 建築展示：不用標題畫面
 
 // ---------------------------------------------------------------- 暫停選單（ESC）
 let pausedBeforeMenu = false;
@@ -256,7 +295,7 @@ const funcBar = new FuncBar([
   {
     id: 'system', icon: '⚙️', label: '系統',
     items: () => [
-      { icon: '🌊', label: '叫下一波', key: '空白', on: () => { if (started) world.spawnWave(); } },
+      { icon: '🌊', label: '叫下一波', key: '空白', on: () => { if (started && UNIT_DEMO) world.spawnWave(); } },
       ...[1, 2, 3].map((s): CardCmd => ({ icon: '⏩', label: `速度 ×${s}`, on: () => { loop.timeScale = s; }, active: () => loop.timeScale === s })),
       { icon: '⏸', label: '暫停選單', key: 'Esc', on: () => setPauseMenu(true) },
     ],
@@ -353,8 +392,8 @@ function hoverTile(size: number): { tx: number; ty: number; x: number; y: number
 
 function act(first: boolean): void {
   if (world.gameOver) return;
-  const t = TOOLS.find((o) => o.id === tool)!;
-  if (t.building !== undefined) {
+  const t = TOOLS.find((o) => o.id === tool);
+  if (t && t.building !== undefined) {
     const size = BUILDING_KINDS[t.building].size;
     const h = hoverTile(size);
     if (!h) return;
@@ -370,9 +409,18 @@ function act(first: boolean): void {
   const h = hoverTile(1);
   if (!h) return;
   switch (tool) {
+    case 'road': {
+      // 可以拖曳連續鋪
+      const key = h.ty * world.map.w + h.tx;
+      if (key === lastPaintTile) return;
+      lastPaintTile = key;
+      world.placeRoad(h.tx, h.ty);
+      break;
+    }
     case 'erase': {
       const b = world.buildingAtTile(h.tx, h.ty);
       if (b) { world.removeBuilding(b, true); if (renderer.selected === b) renderer.selected = null; }
+      else world.removeRoad(h.tx, h.ty);
       break;
     }
     case 'rally': {
@@ -396,8 +444,12 @@ function act(first: boolean): void {
 
 function updateGhost(): void {
   canvas.style.cursor = army.mode ? 'crosshair' : '';
-  const t = TOOLS.find((o) => o.id === tool)!;
-  if (t.building === undefined || !mouse.in) { renderer.setGhost(false); return; }
+  const t = TOOLS.find((o) => o.id === tool);
+  if (tool === 'road' && mouse.in) {
+    const h = hoverTile(1);
+    if (h) { renderer.setGhost(true, h.tx, h.ty, 1, world.canRoad(h.tx, h.ty) && world.canAfford(ECON.roadCost)); return; }
+  }
+  if (!t || t.building === undefined || !mouse.in) { renderer.setGhost(false); return; }
   const k = BUILDING_KINDS[t.building];
   const h = hoverTile(k.size);
   if (!h) { renderer.setGhost(false); return; }
@@ -436,7 +488,7 @@ addEventListener('keydown', (e) => {
     if (army.sel.length || army.inspect >= 0 || renderer.selected) { army.setSelection([], false); renderer.selected = null; return; }
     if (started && !world.gameOver && !world.victory) setPauseMenu(true);
   }
-  else if (k === ' ') { e.preventDefault(); if (started) world.spawnWave(); }
+  else if (k === ' ') { e.preventDefault(); if (started && UNIT_DEMO) world.spawnWave(); }
   else if (k === 'p') loop.paused = !loop.paused;
   else if (k === 'f') renderer.showFlow = !renderer.showFlow;
   else if (k === 'u' && renderer.selected) { world.upgrade(renderer.selected); hud.invalidate(); }

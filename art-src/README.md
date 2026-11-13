@@ -40,11 +40,45 @@
 | 建築 | 資料夾 | 設定圖 | 遊戲圖 |
 |---|---|---|---|
 | 🌳 世界樹市鎮中心 | `buildings/town-center/` | ✅ 五個階段（`stage1`…`stage5`；被換掉的舊版在 `old/`） | `public/sprites/buildings/town_center_1…5.png` |
-| 📦 倉庫 | `buildings/warehouse/` | ✅ 三個階段 | `public/sprites/buildings/warehouse_1…3.png`（還沒放進遊戲） |
-| 🏠 房屋 | `buildings/house/` | ✅ 三個階段 | `public/sprites/buildings/house_1…3.png`（還沒放進遊戲） |
-| 🌾 穀倉 | `buildings/granary/` | ✅ 三個階段 | `public/sprites/buildings/granary_1…3.png`（還沒放進遊戲） |
-| ⚒️ 兵工廠 | `buildings/arsenal/` | ✅ 三個階段 | `public/sprites/buildings/arsenal_1…3.png`（還沒放進遊戲） |
-| 🚜 農場 | `buildings/farm/` | ✅ 三個階段 | `public/sprites/buildings/farm_1…3.png`（還沒放進遊戲） |
-| 🔮 魔法研究院 | `buildings/research/` | ✅ 三個階段 | `public/sprites/buildings/research_1…3.png`（還沒放進遊戲） |
+其他建築都是三個階段，遊戲圖在 `public/sprites/buildings/<遊戲圖名>_1…3.png`，都已經放進遊戲（目前只有圖，功能之後再做）。
 
-建築只用設定圖上的「45° 俯視（主視角）」一張：`tools/cutout-building.ps1` 裁下來並去背成透明 PNG（背景是模糊的漸層光暈，用「顏色平滑延伸」判斷背景）。
+| 建築 | 資料夾 | 遊戲圖名 | 佔地 |
+|---|---|---|---|
+| 📦 倉庫 | `warehouse/` | `warehouse` | 2x2 |
+| 🏠 房屋 | `house/` | `house` | 2x2 |
+| 🌾 穀倉 | `granary/` | `granary` | 2x2 |
+| ⚒️ 兵工廠 | `arsenal/` | `arsenal` | 2x2 |
+| 🚜 農場 | `farm/` | `farm` | 2x2 |
+| 🔮 魔法研究院 | `research/` | `research` | 2x2 |
+| 🍺 釀酒廠 | `brewery/` | `brewery` | 2x2 |
+| 🍻 酒館 | `tavern/` | `tavern` | 2x2 |
+| 🌲 植樹場 | `nursery/` | `nursery` | 2x2 |
+| ⚖️ 市場 | `market/` | `market` | 3x3 |
+| ⛪ 教堂 | `church/` | `church` | 3x3 |
+| 🏹 箭塔 | `watchtower/` | `watchtower` | 1x1 |
+| 🪓 伐木場 | `lumber/` | `lumber` | 2x2 |
+| ⛏️ 採礦場 | `mine/` | `mine` | 2x2 |
+| 🏯 城堡 | `castle/` | `castle` | 3x3 |
+| 🪦 墓園 | `cemetery/` | `cemetery` | 2x2 |
+| 🪚 木材加工廠 | `woodworks/` | `woodworks` | 2x2 |
+| 🪵 木板場 | `plankyard/` | `plankyard` | 2x2 |
+| 🤝 外交館 | `diplomacy/` | `diplomacy` | 3x3 |
+| 🗼 高塔 | `stone-tower/` | `stone_tower` | 3x3（設定圖上標明；塔頂 2x2 可用空間） |
+| 🧱 城牆 | `wall/` | `wall` | 1x1（取代原本程式畫的毛氈牆） |
+| 🏹 箭塔 | `archer-tower/` | `archer_tower` | 1x1（取代藍色的 `watchtower`，那組先留著沒用） |
+| 🚪 城門 | `gate/` | `gate` | 2x2 |
+| 🌬️ 風車 | `windmill/` | `windmill` | 2x2 |
+| 🛠️ 工程工坊 | `workshop/` | `workshop` | 2x2 |
+| 🦌 鹿族軍營 | `barracks-deer/` | `barracks_deer` | 2x2 |
+
+上面最後 6 組是已經去背的橫條圖，用 `tools/split-strip.ps1` 依透明的地方切成三張（順便清掉邊緣的紅色殘影；連在一起時從最空的欄切開）。
+
+## 樹木（`props/`）
+- `props/trees/`：16 種樹 → `public/sprites/props/tree_1…16.png`（1–4 綠樹、5–8 秋天、9–12 松樹、13–16 櫻花）
+- `props/orchard/`：16 種果樹 → `fruit_1…16.png`（蘋果、桃、橘、櫻桃，各 4 個樹形）
+- 地圖上的樹林每 7×7 格一區用同一種樹，偶爾夾一棵天然果樹；用 `tools/cutout-props-batch.ps1` 重裁
+| 軍營：羊、刺刺、狗、鳥人、樹人、魚人、蛛人、狼人、牛、豬 | `barracks-<族>/` | `barracks_<族>` | 2x2 |
+
+建築只用設定圖上的「45° 俯視（主視角）」一張：`tools/cutout-building.ps1` 裁下來並去背成透明 PNG（背景是模糊的漸層光暈，用「顏色平滑延伸」判斷背景；會丟掉旁邊的標籤碎片和被裁到的細橫線）。
+`tools/cutout-buildings-batch.ps1` 記錄每張設定圖三個階段的裁切位置，可以整批重裁（`-Only <資料夾>` 只裁一個）。
+遊戲裡的大小：最高等級的寬度 = 佔地菱形寬 × 1.3，低等級照原圖比例。

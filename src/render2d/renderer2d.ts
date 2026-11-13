@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { BK, BUILDING_KINDS, PROJ, UNIT_KINDS, type ProjKind } from '../sim/data';
+import { BK, BUILDING_KINDS, MAX_LEVEL, PROJ, UNIT_KINDS, type ProjKind } from '../sim/data';
 import { Tile } from '../sim/map';
 import type { Building, Shot, World } from '../sim/world';
 import { ArtLibrary } from '../render/art/library';
@@ -86,7 +86,8 @@ export class Renderer2D {
     void this.art.loadAll();
     void this.loadViewSprites();
     void this.loadProjectiles();
-    void this.loadTownCenter();
+    void this.loadBuildingArt();
+    void this.loadTreeArt();
     addEventListener('resize', () => this.resize());
     this.resize();
   }
@@ -162,27 +163,66 @@ export class Renderer2D {
     this.rockSprites = [0, 1, 2].map((i) => paintRock(i));
   }
 
-  /** 市鎮中心五個階段的圖（public/sprites/buildings/town_center_<1-5>.png，已去背） */
-  private townCenter: Sprite[] = [];
-  private async loadTownCenter(): Promise<void> {
-    // 畫面寬度（佔地 3 格的菱形是 192px，美術含廣場比佔地大；越高階越大）與腳底中心在圖上的位置（由上往下比例）
-    const look: [number, number][] = [[250, 0.80], [270, 0.80], [290, 0.80], [340, 0.82], [370, 0.85]];
-    await Promise.all(look.map(async ([wPx, ayFrac], i) => {
-      const im = await loadImage(`${import.meta.env.BASE_URL}sprites/buildings/town_center_${i + 1}.png`);
-      if (!im) return;
-      const cw = Math.round(wPx * SPRITE_SCALE), ch = Math.round((im.naturalHeight / im.naturalWidth) * cw);
+  /**
+   * 樹的圖（public/sprites/props/tree_1…16.png、fruit_1…16.png，已去背）。載入後取代程式畫的樹。
+   * tree：1–4 綠樹、5–8 秋天、9–12 松樹、13–16 櫻花；fruit：天然果樹（蘋果、桃、橘、櫻桃，每種 4 個樹形）
+   */
+  private treeGroups: Sprite[][] = [];
+  private fruitSprites: Sprite[] = [];
+  private async loadTreeArt(): Promise<void> {
+    const load = (name: string, n: number, wPx: number, ayFrac: number) => Promise.all(Array.from({ length: n }, async (_, i) => {
+      const im = await loadImage(`${import.meta.env.BASE_URL}sprites/props/${name}_${i + 1}.png`);
+      if (!im) return null;
+      const cw = Math.round(wPx * (im.naturalWidth / 220) * SPRITE_SCALE), ch = Math.round((im.naturalHeight / im.naturalWidth) * cw);
       const c = document.createElement('canvas');
       c.width = cw; c.height = ch;
       const g = c.getContext('2d')!;
       g.imageSmoothingQuality = 'high';
       g.drawImage(im, 0, 0, cw, ch);
-      this.townCenter[i] = { canvas: c, ax: cw / 2, ay: ch * ayFrac, top: (ch * ayFrac) / SPRITE_SCALE };
+      return { canvas: c, ax: cw / 2, ay: ch * ayFrac, top: (ch * ayFrac) / SPRITE_SCALE } as Sprite;
     }));
+    const [trees, fruits] = await Promise.all([load('tree', 16, TILE_W * 1.1, 0.93), load('fruit', 16, TILE_W * 1.1, 0.9)]);
+    if (trees.some((s) => !s)) return; // 圖不齊就繼續用程式畫的樹
+    this.treeGroups = [0, 4, 8, 12].map((k) => trees.slice(k, k + 4) as Sprite[]);
+    this.fruitSprites = fruits.filter((s): s is Sprite => !!s);
+    if (this.world) this.buildProps();
+  }
+
+  /** 去背好的建築圖（public/sprites/buildings/<sprite>_<等級>.png），key＝`種類:等級` */
+  private buildingArt = new Map<string, Sprite>();
+  private async loadBuildingArt(): Promise<void> {
+    // 市鎮中心：畫面寬度（佔地 3 格的菱形是 192px，美術含廣場比佔地大；越高階越大）與腳底中心在圖上的位置（由上往下比例）
+    const town: [number, number][] = [[250, 0.80], [270, 0.80], [290, 0.80], [340, 0.82], [370, 0.85]];
+    const jobs: Promise<void>[] = [];
+    BUILDING_KINDS.forEach((k, kind) => {
+      if (!k.sprite) return;
+      const levels = Math.max(MAX_LEVEL, k.upgradeCost.length + 1);
+      jobs.push((async () => {
+      const ims = await Promise.all(Array.from({ length: levels }, (_, i) => loadImage(`${import.meta.env.BASE_URL}sprites/buildings/${k.sprite}_${i + 1}.png`)));
+      // 其他建築：最高等級的寬度 = 佔地菱形寬 × 1.3，低等級照原圖比例縮小（設定圖大小不一，用佔地統一）
+      const maxW = Math.max(1, ...ims.map((im) => im?.naturalWidth ?? 0));
+      const fit = (k.size * TILE_W * 1.3) / maxW;
+      ims.forEach((im, li) => {
+        const lv = li + 1;
+        if (!im) return;
+        const [wPx, ayFrac] = kind === BK.Base ? town[lv - 1] ?? town[town.length - 1] : [im.naturalWidth * fit, 0.78];
+        const cw = Math.round(wPx * SPRITE_SCALE), ch = Math.round((im.naturalHeight / im.naturalWidth) * cw);
+        const c = document.createElement('canvas');
+        c.width = cw; c.height = ch;
+        const g = c.getContext('2d')!;
+        g.imageSmoothingQuality = 'high';
+        g.drawImage(im, 0, 0, cw, ch);
+        this.buildingArt.set(`${kind}:${lv}`, { canvas: c, ax: cw / 2, ay: ch * ayFrac, top: (ch * ayFrac) / SPRITE_SCALE });
+      });
+      })());
+    });
+    await Promise.all(jobs);
   }
 
   private buildingSprite(b: Building): Sprite {
-    if (b.kind === BK.Base && this.townCenter[b.level - 1]) return this.townCenter[b.level - 1];
     const key = `${b.kind}:${b.level}`;
+    const art = this.buildingArt.get(key);
+    if (art) return art;
     let s = this.buildingSprites.get(key);
     if (!s) {
       const art = this.art.forBuilding(b.kind);
@@ -206,6 +246,7 @@ export class Renderer2D {
   setWorld(world: World): void {
     this.world = world;
     this.chunks.clear();
+    this.roadVer = -1;
     this.selected = null;
     this.buildProps();
     this.cam.bounds = { w: world.map.w, h: world.map.h };
@@ -221,7 +262,14 @@ export class Renderer2D {
       if (t !== Tile.Tree && t !== Tile.Rock) continue;
       const x = (i % map.w) + 0.5 + (t === Tile.Tree ? (hash(i + 1) - 0.5) * 0.3 : 0);
       const y = Math.floor(i / map.w) + 0.5 + (t === Tile.Tree ? (hash(i + 2) - 0.5) * 0.3 : 0);
-      const list = t === Tile.Tree ? this.treeSprites : this.rockSprites;
+      let list = t === Tile.Tree ? this.treeSprites : this.rockSprites;
+      if (t === Tile.Tree && this.treeGroups.length) {
+        // 一片樹林同一種樹（每 7×7 格一區），偶爾夾一棵天然果樹
+        const tx = i % map.w, ty = Math.floor(i / map.w);
+        const zone = hash(Math.floor(tx / 7) * 131 + Math.floor(ty / 7) * 977 + 5);
+        const group = zone < 0.45 ? 0 : zone < 0.75 ? 2 : zone < 0.9 ? 1 : 3; // 綠樹 45%、松樹 30%、秋天 15%、櫻花 10%
+        list = this.fruitSprites.length && hash(i + 9) < 0.06 ? this.fruitSprites : this.treeGroups[group];
+      }
       this.props.push({ x, y, sprite: list[Math.floor(hash(i) * list.length)], scale: 0.8 + hash(i + 3) * 0.45, flip: hash(i + 4) > 0.5 });
     }
   }
@@ -335,6 +383,7 @@ export class Renderer2D {
       if (left > vx1 || left + CHUNK * TILE_W < vx0 || sy > vy1 || sy + CHUNK * TILE_H < vy0) continue;
       g.drawImage(this.chunk(cx, cy), left, sy - 1);
     }
+    this.drawRoads(g);
     if (this.showFlow) this.drawFlow(g);
     this.drawGroundMarks(g);
     this.drawUnitMarks(g, alpha);
@@ -359,6 +408,7 @@ export class Renderer2D {
     }
     const u = w.units, t = w.time, sel = this.unitSel;
     const bars: [number, number, number][] = [];
+    const trapped: [number, number][] = [];
     for (let i = 0; i < u.hi; i++) {
       if (!u.alive[i]) continue;
       const x = u.px[i] + (u.x[i] - u.px[i]) * alpha, y = u.py[i] + (u.y[i] - u.py[i]) * alpha;
@@ -373,6 +423,7 @@ export class Renderer2D {
       const sp = (u.hitT[i] > 0 ? (curl ? this.curlFlash : this.unitFlash) : (curl ? this.curlSprites : this.unitSprites))[k][dir];
       if (this.unitShadows) shadows.push([sx, sy, kind.radius * 1.3]);
       if (sel && sel[i]) bars.push([sx, sy - sp.top - 4, u.hp[i] / u.maxHp[i]]);
+      if (u.team[i] === 0 && w.isTrapped(i)) trapped.push([sx, sy - sp.top - 6]);
       items.push({ k: x + y, draw: () => this.drawSprite(g, sp, sx, sy - bob * HEIGHT_PX, 1, false) });
     }
     // 影子（壓扁的橢圓）先畫，所有東西都在影子上面；全部合成一條路徑一次填色（省很多次填色）
@@ -396,6 +447,19 @@ export class Renderer2D {
       g.fillRect(bx - 11, by - 1, 22, 5);
       g.fillStyle = r > 0.5 ? '#5ad35a' : r > 0.25 ? '#f0c040' : '#e05050';
       g.fillRect(bx - 10, by, 20 * Math.max(0, r), 3);
+    }
+    // 被建築關在中間的單位：頭上顯示「無法移動」
+    if (trapped.length) {
+      g.font = 'bold 11px sans-serif';
+      g.textAlign = 'center';
+      for (const [tx, ty] of trapped) {
+        const label = '🚫 無法移動', tw = g.measureText(label).width + 8;
+        g.fillStyle = 'rgba(160,30,30,0.85)';
+        g.beginPath(); g.roundRect(tx - tw / 2, ty - 16, tw, 15, 4); g.fill();
+        g.fillStyle = '#fff';
+        g.fillText(label, tx, ty - 5);
+      }
+      g.textAlign = 'start';
     }
   }
 
@@ -482,6 +546,51 @@ export class Renderer2D {
   private diamond(g: CanvasRenderingContext2D, tx: number, ty: number, size: number): void {
     const a = toScreen(tx, ty), b = toScreen(tx + size, ty), c = toScreen(tx + size, ty + size), d = toScreen(tx, ty + size);
     g.beginPath(); g.moveTo(a[0], a[1]); g.lineTo(b[0], b[1]); g.lineTo(c[0], c[1]); g.lineTo(d[0], d[1]); g.closePath();
+  }
+
+  /** 道路：土黃色石板路，外緣描一圈深色邊（跟隔壁道路相接的邊不描） */
+  private roadTiles: number[] = [];
+  private roadVer = -1;
+  private drawRoads(g: CanvasRenderingContext2D): void {
+    const w = this.world, mw = w.map.w, roads = w.roads;
+    if (this.roadVer !== w.roadsVersion) {
+      this.roadTiles = [];
+      for (let i = 0; i < roads.length; i++) if (roads[i]) this.roadTiles.push(i);
+      this.roadVer = w.roadsVersion;
+    }
+    if (!this.roadTiles.length) return;
+    g.beginPath();
+    for (const i of this.roadTiles) {
+      const tx = i % mw, ty = (i / mw) | 0;
+      const a = toScreen(tx, ty), b = toScreen(tx + 1, ty), c = toScreen(tx + 1, ty + 1), d = toScreen(tx, ty + 1);
+      g.moveTo(a[0], a[1]); g.lineTo(b[0], b[1]); g.lineTo(c[0], c[1]); g.lineTo(d[0], d[1]); g.closePath();
+    }
+    g.fillStyle = '#d2b58a';
+    g.fill();
+    // 石板的縫：每格中間畫一個小菱形
+    g.beginPath();
+    for (const i of this.roadTiles) {
+      const tx = i % mw, ty = (i / mw) | 0;
+      const a = toScreen(tx + 0.25, ty + 0.25), b = toScreen(tx + 0.75, ty + 0.25), c = toScreen(tx + 0.75, ty + 0.75), d = toScreen(tx + 0.25, ty + 0.75);
+      g.moveTo(a[0], a[1]); g.lineTo(b[0], b[1]); g.lineTo(c[0], c[1]); g.lineTo(d[0], d[1]); g.closePath();
+    }
+    g.strokeStyle = 'rgba(120,90,55,0.25)';
+    g.lineWidth = 1;
+    g.stroke();
+    // 外緣
+    const isRoad = (x: number, y: number) => x >= 0 && y >= 0 && x < mw && y < w.map.h && roads[y * mw + x] === 1;
+    g.beginPath();
+    for (const i of this.roadTiles) {
+      const tx = i % mw, ty = (i / mw) | 0;
+      const a = toScreen(tx, ty), b = toScreen(tx + 1, ty), c = toScreen(tx + 1, ty + 1), d = toScreen(tx, ty + 1);
+      if (!isRoad(tx, ty - 1)) { g.moveTo(a[0], a[1]); g.lineTo(b[0], b[1]); }
+      if (!isRoad(tx + 1, ty)) { g.moveTo(b[0], b[1]); g.lineTo(c[0], c[1]); }
+      if (!isRoad(tx, ty + 1)) { g.moveTo(c[0], c[1]); g.lineTo(d[0], d[1]); }
+      if (!isRoad(tx - 1, ty)) { g.moveTo(d[0], d[1]); g.lineTo(a[0], a[1]); }
+    }
+    g.strokeStyle = '#9c7a4e';
+    g.lineWidth = 2;
+    g.stroke();
   }
 
   /** 地面上的標記：建造預覽、選取框、射程圈 */
