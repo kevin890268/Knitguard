@@ -130,6 +130,8 @@ export const UK = {
   BoneGrunt: 43, BoneSword: 44, BoneBow: 45, BoneFlag: 46, BoneCart: 47,
   // 毛球族第三階段（第一、二、四階段是最上面的 Fuzz、Runner、Brute）
   HornFuzz: 48,
+  // 各族掌旗手（輔助：周圍隊友攻擊 +2，和號角手一樣）
+  FlagPig: 49, FlagBull: 50, FlagWolf: 51, FlagSpider: 52, FlagFish: 53, FlagDeer: 54, FlagTreant: 55,
 } as const;
 
 const P = Team.Player, L = Armor.Light, H = Armor.Heavy;
@@ -206,6 +208,14 @@ export const UNIT_KINDS: UnitKind[] = [
   { name: '骷髏骨頭車', team: Team.Enemy, hp: 180, speed: 1.0, radius: 0.5, damage: 18, attackCd: 2.5, reach: 0.2, aggro: 3, reward: 6, color: 0xb8a888, scale: 1.05, model: 'monster', armor: H, meleeDef: 2, rangedDef: 6, wheeled: true, bldMul: 3 },
   // 毛球族第三階段：角毛球獸（衝鋒撞擊，打建築有加成）
   { name: '角毛球獸', team: Team.Enemy, hp: 150, speed: 1.9, radius: 0.42, damage: 14, attackCd: 1.3, reach: 0.15, aggro: 4, reward: 5, color: 0x8aa55a, scale: 0.85, model: 'monster', armor: H, meleeDef: 1, rangedDef: 1, bldMul: 1.5 },
+  // ---- 各族掌旗手：不攻擊，周圍 4 格的隊友攻擊 +2（不疊加，和號角手取最大）
+  { name: '豬人族掌旗手', team: P, hp: 80, speed: 2.3, radius: 0.3, damage: 0, attackCd: 1, reach: 0.1, aggro: 0, reward: 0, color: 0xf4b6c2, scale: 0.68, model: 'sheep', armor: L, meleeDef: 1, rangedDef: 1, support: true, skill: { type: 'horn', radius: 4, atk: 2 } },
+  { name: '牛人族掌旗手', team: P, hp: 80, speed: 2.3, radius: 0.3, damage: 0, attackCd: 1, reach: 0.1, aggro: 0, reward: 0, color: 0xd9b48a, scale: 0.68, model: 'sheep', armor: L, meleeDef: 1, rangedDef: 1, support: true, skill: { type: 'horn', radius: 4, atk: 2 } },
+  { name: '狼人族掌旗手', team: P, hp: 80, speed: 2.3, radius: 0.3, damage: 0, attackCd: 1, reach: 0.1, aggro: 0, reward: 0, color: 0x9a9a9a, scale: 0.68, model: 'sheep', armor: L, meleeDef: 1, rangedDef: 1, support: true, skill: { type: 'horn', radius: 4, atk: 2 } },
+  { name: '蛛人族掌旗手', team: P, hp: 80, speed: 2.3, radius: 0.3, damage: 0, attackCd: 1, reach: 0.1, aggro: 0, reward: 0, color: 0x6b5b7b, scale: 0.68, model: 'sheep', armor: L, meleeDef: 1, rangedDef: 1, support: true, skill: { type: 'horn', radius: 4, atk: 2 } },
+  { name: '魚人族掌旗手', team: P, hp: 80, speed: 2.3, radius: 0.3, damage: 0, attackCd: 1, reach: 0.1, aggro: 0, reward: 0, color: 0x7fb6e0, scale: 0.68, model: 'sheep', armor: L, meleeDef: 1, rangedDef: 1, support: true, skill: { type: 'horn', radius: 4, atk: 2 } },
+  { name: '鹿族掌旗手', team: P, hp: 80, speed: 2.3, radius: 0.3, damage: 0, attackCd: 1, reach: 0.1, aggro: 0, reward: 0, color: 0xc9a27a, scale: 0.68, model: 'sheep', armor: L, meleeDef: 1, rangedDef: 1, support: true, skill: { type: 'horn', radius: 4, atk: 2 } },
+  { name: '樹人族掌旗手', team: P, hp: 80, speed: 2.3, radius: 0.3, damage: 0, attackCd: 1, reach: 0.1, aggro: 0, reward: 0, color: 0x7a9a5a, scale: 0.68, model: 'sheep', armor: L, meleeDef: 1, rangedDef: 1, support: true, skill: { type: 'horn', radius: 4, atk: 2 } },
 ];
 
 export interface BuildingKind {
@@ -274,19 +284,19 @@ export const BUILDING_KINDS: BuildingKind[] = [
   { name: '刺刺族軍營', icon: '🦔', size: 2, hp: 450, cost: 60, color: 0xc9a27a, upgradeCost: [60, 120], sprite: 'barracks_spiky' },
   { name: '狗族軍營', icon: '🐕', size: 2, hp: 400, cost: 60, color: 0xc9a27a, upgradeCost: [60, 120], sprite: 'barracks_dog' },
   { name: '鳥人族軍營', icon: '🦅', size: 2, hp: 400, cost: 60, color: 0xc9a27a, upgradeCost: [60, 120], sprite: 'barracks_bird' },
-  { name: '樹人族軍營', icon: '🌳', size: 2, hp: 450, cost: 60, color: 0xa9d494, upgradeCost: [60, 120], sprite: 'barracks_treant', spawnCap: 3, trains: [UK.TreantShield, UK.TreantJavelin, UK.TreantAxeCart, UK.TreantClub] },
-  { name: '魚人族軍營', icon: '🐟', size: 2, hp: 400, cost: 60, color: 0x7fb6e0, upgradeCost: [60, 120], sprite: 'barracks_fish', spawnCap: 3, trains: [UK.FishHarpoon, UK.FishSpear, UK.FishCannon, UK.FishAnchor] },
-  { name: '蛛人族軍營', icon: '🕷️', size: 2, hp: 400, cost: 60, color: 0xb59ad9, upgradeCost: [60, 120], sprite: 'barracks_spider', spawnCap: 3, trains: [UK.SpiderDrop, UK.SpiderWeb, UK.SpiderBallista, UK.SpiderFlail] },
-  { name: '狼人族軍營', icon: '🐺', size: 2, hp: 400, cost: 60, color: 0x9a9a9a, upgradeCost: [60, 120], sprite: 'barracks_wolf', spawnCap: 3, trains: [UK.WolfClaw, UK.WolfSlinger, UK.WolfTrebuchet, UK.WolfBerserker] },
-  { name: '牛族軍營', icon: '🐂', size: 2, hp: 500, cost: 60, color: 0xc9a27a, upgradeCost: [60, 120], sprite: 'barracks_bull', spawnCap: 3, trains: [UK.BullAxe, UK.BullArcher, UK.BullGreataxe, UK.BullRam] },
-  { name: '豬族軍營', icon: '🐗', size: 2, hp: 450, cost: 60, color: 0xf2a7b5, upgradeCost: [60, 120], sprite: 'barracks_pig', spawnCap: 3, trains: [UK.PigHammer, UK.PigCrossbow, UK.PigGiant, UK.PigCatapult] },
+  { name: '樹人族軍營', icon: '🌳', size: 2, hp: 450, cost: 60, color: 0xa9d494, upgradeCost: [60, 120], sprite: 'barracks_treant', spawnCap: 3, trains: [UK.TreantShield, UK.TreantJavelin, UK.TreantAxeCart, UK.TreantClub, UK.FlagTreant] },
+  { name: '魚人族軍營', icon: '🐟', size: 2, hp: 400, cost: 60, color: 0x7fb6e0, upgradeCost: [60, 120], sprite: 'barracks_fish', spawnCap: 3, trains: [UK.FishHarpoon, UK.FishSpear, UK.FishCannon, UK.FishAnchor, UK.FlagFish] },
+  { name: '蛛人族軍營', icon: '🕷️', size: 2, hp: 400, cost: 60, color: 0xb59ad9, upgradeCost: [60, 120], sprite: 'barracks_spider', spawnCap: 3, trains: [UK.SpiderDrop, UK.SpiderWeb, UK.SpiderBallista, UK.SpiderFlail, UK.FlagSpider] },
+  { name: '狼人族軍營', icon: '🐺', size: 2, hp: 400, cost: 60, color: 0x9a9a9a, upgradeCost: [60, 120], sprite: 'barracks_wolf', spawnCap: 3, trains: [UK.WolfClaw, UK.WolfSlinger, UK.WolfTrebuchet, UK.WolfBerserker, UK.FlagWolf] },
+  { name: '牛族軍營', icon: '🐂', size: 2, hp: 500, cost: 60, color: 0xc9a27a, upgradeCost: [60, 120], sprite: 'barracks_bull', spawnCap: 3, trains: [UK.BullAxe, UK.BullArcher, UK.BullGreataxe, UK.BullRam, UK.FlagBull] },
+  { name: '豬族軍營', icon: '🐗', size: 2, hp: 450, cost: 60, color: 0xf2a7b5, upgradeCost: [60, 120], sprite: 'barracks_pig', spawnCap: 3, trains: [UK.PigHammer, UK.PigCrossbow, UK.PigGiant, UK.PigCatapult, UK.FlagPig] },
   // 高塔 3x3：塔頂 2x2 之後可以放單位（站上去射得更遠）
   { name: '高塔', icon: '🗼', size: 3, hp: 900, cost: 120, color: 0xd9d4c4, upgradeCost: [120, 240], sprite: 'stone_tower' },
   // 城門 1×3：中間 2 格寬的通道，我方靠近自動開門通過；敵人過不去，要拆門（放置時按 R 轉向）
   { name: '城門', icon: '🚪', size: 3, w: 3, h: 1, hp: 600, cost: 30, color: 0xd9d4c4, upgradeCost: [40, 80], sprite: 'gate' },
   { name: '風車', icon: '🌬️', size: 2, hp: 300, cost: 50, color: 0xc9a27a, upgradeCost: [50, 100], sprite: 'windmill' },
   { name: '工程工坊', icon: '🛠️', size: 2, hp: 400, cost: 70, color: 0xc9a27a, upgradeCost: [70, 140], sprite: 'workshop' },
-  { name: '鹿族軍營', icon: '🦌', size: 2, hp: 400, cost: 60, color: 0xa9d494, upgradeCost: [60, 120], sprite: 'barracks_deer', spawnCap: 3, trains: [UK.DeerSaber, UK.DeerLongbow, UK.DeerRam, UK.DeerDruid] },
+  { name: '鹿族軍營', icon: '🦌', size: 2, hp: 400, cost: 60, color: 0xa9d494, upgradeCost: [60, 120], sprite: 'barracks_deer', spawnCap: 3, trains: [UK.DeerSaber, UK.DeerLongbow, UK.DeerRam, UK.DeerDruid, UK.FlagDeer] },
   // 哨塔 1x1：小型瞭望台（功能之後再定，例如看得比較遠）
   { name: '哨塔', icon: '🗼', size: 1, hp: 150, cost: 20, color: 0xc9a27a, upgradeCost: [25, 50], sprite: 'archer_tower' },
 ];
@@ -322,13 +332,13 @@ export const TRIBES: { id: string; name: string; kinds: number[] }[] = [
   { id: 'sheep', name: '🐑 羊族', kinds: [UK.Lancer, UK.Archer, UK.Catapult, UK.Horn] },
   { id: 'spiky', name: '🦔 刺刺族', kinds: [UK.Spineball, UK.Javelin, UK.Ballista, UK.Trapper] },
   { id: 'dog', name: '🐕 狗族', kinds: [UK.DogCav, UK.Barker, UK.StBernard] },
-  { id: 'pig', name: '🐗 豬人族', kinds: [UK.PigHammer, UK.PigCrossbow, UK.PigGiant, UK.PigCatapult] },
-  { id: 'bull', name: '🐂 牛人族', kinds: [UK.BullAxe, UK.BullArcher, UK.BullGreataxe, UK.BullRam] },
-  { id: 'deer', name: '🦌 鹿族', kinds: [UK.DeerSaber, UK.DeerLongbow, UK.DeerRam, UK.DeerDruid] },
-  { id: 'wolf', name: '🐺 狼人族', kinds: [UK.WolfClaw, UK.WolfSlinger, UK.WolfTrebuchet, UK.WolfBerserker] },
-  { id: 'fish', name: '🐟 魚人族', kinds: [UK.FishHarpoon, UK.FishSpear, UK.FishCannon, UK.FishAnchor] },
-  { id: 'spider', name: '🕷️ 蛛人族', kinds: [UK.SpiderDrop, UK.SpiderWeb, UK.SpiderBallista, UK.SpiderFlail] },
-  { id: 'treant', name: '🌳 樹人族', kinds: [UK.TreantShield, UK.TreantJavelin, UK.TreantAxeCart, UK.TreantClub] },
+  { id: 'pig', name: '🐗 豬人族', kinds: [UK.PigHammer, UK.PigCrossbow, UK.PigGiant, UK.PigCatapult, UK.FlagPig] },
+  { id: 'bull', name: '🐂 牛人族', kinds: [UK.BullAxe, UK.BullArcher, UK.BullGreataxe, UK.BullRam, UK.FlagBull] },
+  { id: 'deer', name: '🦌 鹿族', kinds: [UK.DeerSaber, UK.DeerLongbow, UK.DeerRam, UK.DeerDruid, UK.FlagDeer] },
+  { id: 'wolf', name: '🐺 狼人族', kinds: [UK.WolfClaw, UK.WolfSlinger, UK.WolfTrebuchet, UK.WolfBerserker, UK.FlagWolf] },
+  { id: 'fish', name: '🐟 魚人族', kinds: [UK.FishHarpoon, UK.FishSpear, UK.FishCannon, UK.FishAnchor, UK.FlagFish] },
+  { id: 'spider', name: '🕷️ 蛛人族', kinds: [UK.SpiderDrop, UK.SpiderWeb, UK.SpiderBallista, UK.SpiderFlail, UK.FlagSpider] },
+  { id: 'treant', name: '🌳 樹人族', kinds: [UK.TreantShield, UK.TreantJavelin, UK.TreantAxeCart, UK.TreantClub, UK.FlagTreant] },
 ];
 
 /** 敵人的種族（屍潮裡出現；圖鑑最下面一排、對打測試的 enemy 模式用） */

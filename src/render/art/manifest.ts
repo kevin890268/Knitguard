@@ -98,6 +98,14 @@ export const ART_SLOTS: ArtSlot[] = [
   unit('treant_javelin', '重型標槍兵', UK.TreantJavelin, 'front', { height: 1.25 }),
   unit('treant_axecart', '重型斧頭車', UK.TreantAxeCart, 'front', { height: 1.1 }),
   unit('treant_club', '重型巨棒兵', UK.TreantClub, 'front', { height: 1.3 }),
+  // 各族掌旗手（一張設定圖七族，每族 6 個角度：正面、左前、左後、背面、右後、右前）
+  unit('flag_pig', '豬人族掌旗手', UK.FlagPig, 'front', { height: 1.2 }),
+  unit('flag_bull', '牛人族掌旗手', UK.FlagBull, 'front', { height: 1.2 }),
+  unit('flag_wolf', '狼人族掌旗手', UK.FlagWolf, 'front', { height: 1.2 }),
+  unit('flag_spider', '蛛人族掌旗手', UK.FlagSpider, 'front', { height: 1.2 }),
+  unit('flag_fish', '魚人族掌旗手', UK.FlagFish, 'front', { height: 1.2 }),
+  unit('flag_deer', '鹿族掌旗手', UK.FlagDeer, 'front', { height: 1.2 }),
+  unit('flag_treant', '樹人族掌旗手', UK.FlagTreant, 'front', { height: 1.2 }),
   // 敵人：骨頭族（只取第一排旋轉圖；劍兵原圖是白底，-FloodWhite）
   unit('bone_grunt', '骷髏雜兵', UK.BoneGrunt, 'front', { height: 1.15 }),
   unit('bone_sword', '骷髏劍兵', UK.BoneSword, 'front', { height: 1.15 }),
