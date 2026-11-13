@@ -16,6 +16,12 @@ export const Armor = { Light: 0, Heavy: 1 } as const;
  *   trap    陷阱工程師：每 cd 秒在敵人來的方向放一個陷阱（最多 max 個）；踩到受 dmg 傷害並變慢
  *   bark    吠叫兵：攻擊時對自己周圍 radius 內的敵人吼叫，讓它們變慢（移動、攻擊速度）
  *   heal    聖伯納救援犬：每 cd 秒治療範圍內最需要的我方 amount 血
+ *   splash  水砲攻城器：水彈落地時，半徑 radius 內的敵人都受傷害
+ *   anchor  船錨兵：被打中的敵人會被拖慢（和吠叫一樣的減速）
+ *   pounce  快爪手：跑了至少 run 秒後的第一下攻擊（停下來前那一擊）多 bonus 傷害；打完要再跑起來才會重新蓄好
+ *   rage    狂化狼人：血量低於 below（比例）時狂化，攻擊間隔 ×(1−atkSpeed)、移動 ×(1+moveSpeed)；
+ *           低於 deep 時深度狂化：再加攻擊 ×(1+dmg)、每秒回 regen 血
+ *   thorns  德魯伊：每 cd 秒在 range 內的敵人腳下長出樹枝，半徑 radius 內的敵人每秒受 dps 傷害、持續 dur 秒
  */
 export type UnitSkill =
   | { type: 'horn'; radius: number; atk: number }
@@ -23,7 +29,12 @@ export type UnitSkill =
   | { type: 'pierce'; width: number }
   | { type: 'trap'; cd: number; dmg: number; max: number }
   | { type: 'bark'; radius: number }
-  | { type: 'heal'; radius: number; amount: number; cd: number };
+  | { type: 'heal'; radius: number; amount: number; cd: number }
+  | { type: 'thorns'; range: number; radius: number; dps: number; dur: number; cd: number }
+  | { type: 'rage'; below: number; atkSpeed: number; moveSpeed: number; deep: number; dmg: number; regen: number }
+  | { type: 'pounce'; bonus: number; run: number }
+  | { type: 'splash'; radius: number }
+  | { type: 'anchor' };
 
 /**
  * 我方部隊的視野（格）：待命、攻擊移動、巡邏時，這個範圍內有敵人就會圍過去打（取兵種索敵範圍和這個的較大值）。
@@ -41,12 +52,15 @@ export const SQUAD = { pull: 16, fight: 6, supportGap: 3 };
 export const SLOW = { move: 0.4, attack: 0.4, dur: 2.5 };
 
 /** 彈道：飛行速度（格/秒）和拋物線高度（格）。spike（尖刺弩砲）是貫穿，傷害在發射時就算 */
-export type ProjKind = 'arrow' | 'javelin' | 'stone' | 'spike';
+export type ProjKind = 'arrow' | 'javelin' | 'stone' | 'spike' | 'pebble' | 'boulder' | 'water';
 export const PROJ: Record<ProjKind, { speed: number; arc: number }> = {
   arrow: { speed: 14, arc: 0.6 },
   javelin: { speed: 10, arc: 0.5 },
   stone: { speed: 7, arc: 2.2 },
   spike: { speed: 20, arc: 0 },
+  pebble: { speed: 12, arc: 0.9 }, // 投石手的小石頭（畫面上用小一號的石頭）
+  boulder: { speed: 6, arc: 3.2 },
+  water: { speed: 9, arc: 1.4 }, // 水砲的水彈（畫面上畫一團藍色的水） // 配重投石機的大石頭（拋得很高、畫得比較大）
 };
 
 export interface UnitKind {
@@ -72,6 +86,8 @@ export interface UnitKind {
   bonusHeavy?: number; // 打重甲時多的傷害
   bonusLarge?: number; // 打大型單位（半徑 ≥ 0.45）時多的傷害
   skill?: UnitSkill;
+  /** 種族特色「出血」（魚人族）：打中的敵人每秒受 dps 傷害、持續 dur 秒（重複打中只會重新計時，不會疊加） */
+  bleed?: { dps: number; dur: number };
   /** 不主動攻擊，只待在崗位上（號角手、救援犬） */
   support?: boolean;
   /** 遠程丟出去的東西（畫面上會飛過去，飛到才扣血） */
@@ -86,6 +102,10 @@ export const UK = {
   Spineball: 8, Javelin: 9, Ballista: 10, Trapper: 11,
   DogCav: 12, Barker: 13, StBernard: 14,
   PigHammer: 15, PigCrossbow: 16, PigGiant: 17, PigCatapult: 18,
+  BullAxe: 19, BullArcher: 20, BullGreataxe: 21, BullRam: 22,
+  DeerSaber: 23, DeerLongbow: 24, DeerRam: 25, DeerDruid: 26,
+  WolfClaw: 27, WolfSlinger: 28, WolfTrebuchet: 29, WolfBerserker: 30,
+  FishHarpoon: 31, FishSpear: 32, FishCannon: 33, FishAnchor: 34,
 } as const;
 
 const P = Team.Player, L = Armor.Light, H = Armor.Heavy;
@@ -116,6 +136,30 @@ export const UNIT_KINDS: UnitKind[] = [
   { name: '弩兵', team: P, hp: 70, speed: 2.1, radius: 0.3, damage: 14, attackCd: 2.0, reach: 0.1, aggro: 8, reward: 0, color: 0xf4b6c2, scale: 0.66, model: 'sheep', armor: L, range: 6.5, bonusHeavy: 6, proj: 'arrow' },
   { name: '巨槌兵', team: P, hp: 260, speed: 1.5, radius: 0.45, damage: 28, attackCd: 2.2, reach: 0.2, aggro: 4.5, reward: 0, color: 0xf4b6c2, scale: 0.95, model: 'sheep', armor: H, meleeDef: 4, rangedDef: 2, bonusHeavy: 12 },
   { name: '豬人投石車', team: P, hp: 150, speed: 1.1, radius: 0.5, damage: 36, attackCd: 3.4, reach: 0.1, aggro: 10.5, reward: 0, color: 0xf4b6c2, scale: 1.1, model: 'sheep', armor: H, meleeDef: 1, rangedDef: 5, range: 9, bonusHeavy: 18, proj: 'stone', wheeled: true },
+  // ---- 牛人族（救回的良善牛人；牛族軍營輪流訓練）。還沒有圖，暫用羊人的模型
+  // 輕型斧頭兵：快、打輕甲有加成　輕型弓箭手：便宜的遠程　重型巨斧兵：重甲，打大型有加成　重型衝撞車：很硬很慢的近戰攻城車，一撞傷害很高
+  { name: '輕型斧頭兵', team: P, hp: 95, speed: 2.5, radius: 0.32, damage: 10, attackCd: 0.9, reach: 0.15, aggro: 5, reward: 0, color: 0xd9b48a, scale: 0.7, model: 'sheep', armor: L, meleeDef: 1, bonusLight: 4 },
+  { name: '輕型弓箭手', team: P, hp: 60, speed: 2.4, radius: 0.3, damage: 7, attackCd: 1.1, reach: 0.1, aggro: 7.5, reward: 0, color: 0xd9b48a, scale: 0.66, model: 'sheep', armor: L, range: 6, bonusLight: 3, proj: 'arrow' },
+  { name: '重型巨斧兵', team: P, hp: 240, speed: 1.6, radius: 0.44, damage: 22, attackCd: 1.8, reach: 0.25, aggro: 4.5, reward: 0, color: 0xd9b48a, scale: 0.95, model: 'sheep', armor: H, meleeDef: 4, rangedDef: 3, bonusLarge: 12 },
+  { name: '重型衝撞車', team: P, hp: 380, speed: 1.2, radius: 0.55, damage: 40, attackCd: 2.8, reach: 0.25, aggro: 4.5, reward: 0, color: 0xd9b48a, scale: 1.1, model: 'sheep', armor: H, meleeDef: 6, rangedDef: 8, bonusHeavy: 15, bonusLarge: 15, wheeled: true },
+  // ---- 鹿族（鹿族軍營輪流訓練）：全部輕甲、靈活。還沒有圖，暫用羊人的模型
+  // 輕型彎刀手：出手快、打輕甲有加成　輕型長弓兵：射程最遠的弓　輕型鹿角衝撞車：比牛人衝撞車快、比較脆　輕型德魯伊：召喚樹枝，範圍持續傷害
+  { name: '輕型彎刀手', team: P, hp: 85, speed: 2.8, radius: 0.3, damage: 7, attackCd: 0.6, reach: 0.15, aggro: 5, reward: 0, color: 0xc9a27a, scale: 0.68, model: 'sheep', armor: L, bonusLight: 3 },
+  { name: '輕型長弓兵', team: P, hp: 50, speed: 2.5, radius: 0.28, damage: 6, attackCd: 1.2, reach: 0.1, aggro: 9, reward: 0, color: 0xc9a27a, scale: 0.66, model: 'sheep', armor: L, range: 7.5, bonusLight: 2, proj: 'arrow' },
+  { name: '輕型鹿角衝撞車', team: P, hp: 200, speed: 1.9, radius: 0.5, damage: 24, attackCd: 2.2, reach: 0.25, aggro: 4.5, reward: 0, color: 0xc9a27a, scale: 1.0, model: 'sheep', armor: L, meleeDef: 3, rangedDef: 4, bonusHeavy: 8, bonusLarge: 10, wheeled: true },
+  { name: '輕型德魯伊', team: P, hp: 60, speed: 2.4, radius: 0.28, damage: 0, attackCd: 1, reach: 0.1, aggro: 7, reward: 0, color: 0xc9a27a, scale: 0.66, model: 'sheep', armor: L, support: true, skill: { type: 'thorns', range: 6.5, radius: 1.4, dps: 6, dur: 4, cd: 5 } },
+  // ---- 狼人族（狼人族軍營輪流訓練）。還沒有圖，暫用羊人的模型
+  // 輕型快爪手：最快的近戰、出手很快　輕型投石手：便宜的短程　巨型配重投石機：射程最遠、單發最重、非常慢　輕型狂化狼人：血少時狂化（攻擊、移動變快）
+  { name: '輕型快爪手', team: P, hp: 80, speed: 3.4, radius: 0.3, damage: 6, attackCd: 0.5, reach: 0.12, aggro: 5.5, reward: 0, color: 0x9a9a9a, scale: 0.68, model: 'sheep', armor: L, bonusLight: 2, skill: { type: 'pounce', bonus: 14, run: 0.6 } },
+  { name: '輕型投石手', team: P, hp: 55, speed: 2.6, radius: 0.28, damage: 7, attackCd: 1.3, reach: 0.1, aggro: 6.5, reward: 0, color: 0x9a9a9a, scale: 0.64, model: 'sheep', armor: L, range: 5, bonusHeavy: 3, proj: 'pebble' },
+  { name: '巨型配重投石機', team: P, hp: 260, speed: 0.8, radius: 0.65, damage: 60, attackCd: 5, reach: 0.1, aggro: 12.5, reward: 0, color: 0x9a9a9a, scale: 1.3, model: 'sheep', armor: H, meleeDef: 2, rangedDef: 6, range: 11, bonusHeavy: 30, bonusLarge: 15, proj: 'boulder', wheeled: true },
+  { name: '輕型狂化狼人', team: P, hp: 110, speed: 2.8, radius: 0.33, damage: 10, attackCd: 0.9, reach: 0.15, aggro: 5.5, reward: 0, color: 0x9a9a9a, scale: 0.72, model: 'sheep', armor: L, skill: { type: 'rage', below: 0.5, atkSpeed: 0.45, moveSpeed: 0.35, deep: 0.3, dmg: 0.2, regen: 4 } },
+  // ---- 魚人族（魚人族軍營輪流訓練）。種族特色：出血（打中的敵人持續掉血）。還沒有圖，暫用羊人的模型
+  // 輕型魚叉兵：短程丟魚叉、打大型有加成　輕型魚矛兵：長矛近戰、碰得比較遠　輕型水砲攻城器：水彈落地濺開、打一片　重型魚人船錨兵：重甲、慢，船錨打中會拖慢敵人
+  { name: '輕型魚叉兵', team: P, hp: 60, speed: 2.4, radius: 0.29, damage: 9, attackCd: 1.3, reach: 0.1, aggro: 6, reward: 0, color: 0x7fb6e0, scale: 0.66, model: 'sheep', armor: L, range: 4.5, bonusLarge: 6, proj: 'javelin', bleed: { dps: 3, dur: 4 } },
+  { name: '輕型魚矛兵', team: P, hp: 90, speed: 2.4, radius: 0.31, damage: 9, attackCd: 1.0, reach: 0.45, aggro: 5, reward: 0, color: 0x7fb6e0, scale: 0.68, model: 'sheep', armor: L, meleeDef: 2, bonusLarge: 8, bleed: { dps: 3, dur: 4 } },
+  { name: '輕型水砲攻城器', team: P, hp: 140, speed: 1.4, radius: 0.5, damage: 14, attackCd: 3.0, reach: 0.1, aggro: 9.5, reward: 0, color: 0x7fb6e0, scale: 1.05, model: 'sheep', armor: L, rangedDef: 3, range: 8, bonusHeavy: 6, proj: 'water', wheeled: true, skill: { type: 'splash', radius: 1.3 }, bleed: { dps: 2, dur: 3 } },
+  { name: '重型魚人船錨兵', team: P, hp: 230, speed: 1.6, radius: 0.42, damage: 20, attackCd: 1.8, reach: 0.25, aggro: 4.5, reward: 0, color: 0x7fb6e0, scale: 0.92, model: 'sheep', armor: H, meleeDef: 4, rangedDef: 3, bonusHeavy: 8, skill: { type: 'anchor' }, bleed: { dps: 5, dur: 4 } },
 ];
 
 export interface BuildingKind {
@@ -185,10 +229,10 @@ export const BUILDING_KINDS: BuildingKind[] = [
   { name: '狗族軍營', icon: '🐕', size: 2, hp: 400, cost: 60, color: 0xc9a27a, upgradeCost: [60, 120], sprite: 'barracks_dog' },
   { name: '鳥人族軍營', icon: '🦅', size: 2, hp: 400, cost: 60, color: 0xc9a27a, upgradeCost: [60, 120], sprite: 'barracks_bird' },
   { name: '樹人族軍營', icon: '🌳', size: 2, hp: 450, cost: 60, color: 0xa9d494, upgradeCost: [60, 120], sprite: 'barracks_treant' },
-  { name: '魚人族軍營', icon: '🐟', size: 2, hp: 400, cost: 60, color: 0x7fb6e0, upgradeCost: [60, 120], sprite: 'barracks_fish' },
+  { name: '魚人族軍營', icon: '🐟', size: 2, hp: 400, cost: 60, color: 0x7fb6e0, upgradeCost: [60, 120], sprite: 'barracks_fish', spawnCap: 3, trains: [UK.FishHarpoon, UK.FishSpear, UK.FishCannon, UK.FishAnchor] },
   { name: '蛛人族軍營', icon: '🕷️', size: 2, hp: 400, cost: 60, color: 0xb59ad9, upgradeCost: [60, 120], sprite: 'barracks_spider' },
-  { name: '狼人族軍營', icon: '🐺', size: 2, hp: 400, cost: 60, color: 0x9a9a9a, upgradeCost: [60, 120], sprite: 'barracks_wolf' },
-  { name: '牛族軍營', icon: '🐂', size: 2, hp: 500, cost: 60, color: 0xc9a27a, upgradeCost: [60, 120], sprite: 'barracks_bull' },
+  { name: '狼人族軍營', icon: '🐺', size: 2, hp: 400, cost: 60, color: 0x9a9a9a, upgradeCost: [60, 120], sprite: 'barracks_wolf', spawnCap: 3, trains: [UK.WolfClaw, UK.WolfSlinger, UK.WolfTrebuchet, UK.WolfBerserker] },
+  { name: '牛族軍營', icon: '🐂', size: 2, hp: 500, cost: 60, color: 0xc9a27a, upgradeCost: [60, 120], sprite: 'barracks_bull', spawnCap: 3, trains: [UK.BullAxe, UK.BullArcher, UK.BullGreataxe, UK.BullRam] },
   { name: '豬族軍營', icon: '🐗', size: 2, hp: 450, cost: 60, color: 0xf2a7b5, upgradeCost: [60, 120], sprite: 'barracks_pig', spawnCap: 3, trains: [UK.PigHammer, UK.PigCrossbow, UK.PigGiant, UK.PigCatapult] },
   // 高塔 3x3：塔頂 2x2 之後可以放單位（站上去射得更遠）
   { name: '高塔', icon: '🗼', size: 3, hp: 900, cost: 120, color: 0xd9d4c4, upgradeCost: [120, 240], sprite: 'stone_tower' },
@@ -196,7 +240,7 @@ export const BUILDING_KINDS: BuildingKind[] = [
   { name: '城門', icon: '🚪', size: 3, w: 3, h: 1, hp: 600, cost: 30, color: 0xd9d4c4, upgradeCost: [40, 80], sprite: 'gate' },
   { name: '風車', icon: '🌬️', size: 2, hp: 300, cost: 50, color: 0xc9a27a, upgradeCost: [50, 100], sprite: 'windmill' },
   { name: '工程工坊', icon: '🛠️', size: 2, hp: 400, cost: 70, color: 0xc9a27a, upgradeCost: [70, 140], sprite: 'workshop' },
-  { name: '鹿族軍營', icon: '🦌', size: 2, hp: 400, cost: 60, color: 0xa9d494, upgradeCost: [60, 120], sprite: 'barracks_deer' },
+  { name: '鹿族軍營', icon: '🦌', size: 2, hp: 400, cost: 60, color: 0xa9d494, upgradeCost: [60, 120], sprite: 'barracks_deer', spawnCap: 3, trains: [UK.DeerSaber, UK.DeerLongbow, UK.DeerRam, UK.DeerDruid] },
   // 哨塔 1x1：小型瞭望台（功能之後再定，例如看得比較遠）
   { name: '哨塔', icon: '🗼', size: 1, hp: 150, cost: 20, color: 0xc9a27a, upgradeCost: [25, 50], sprite: 'archer_tower' },
 ];

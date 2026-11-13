@@ -17,6 +17,26 @@
 | 🐕 狗族 | 吠叫兵 | `dog/bark/` | ✅ | `barker/` |
 | 🐕 狗族 | 聖伯納救援犬 | `dog/rescue/` | ✅ | `stbernard/` |
 | 🐕 狗族 | 運輸兵 | `dog/transporter/` | ✅（還沒裁成遊戲圖；等有物資系統再做） | — |
+| 🐗 豬人族 | 槌頭兵 | `pig/hammer/` | ✅ 16 方向旋轉圖（已去背） | `pig_hammer/` |
+| 🐗 豬人族 | 弩兵 | `pig/crossbow/` | ✅ 16 方向 | `pig_crossbow/` |
+| 🐗 豬人族 | 巨槌兵 | `pig/giant/` | ✅ 15 方向 | `pig_giant/` |
+| 🐗 豬人族 | 投石車 | `pig/catapult/` | ✅ 16 方向 | `pig_catapult/` |
+| 🐂 牛人族 | 輕型斧頭兵 | `bull/axe/` | ✅ 16 方向 | `bull_axe/` |
+| 🐂 牛人族 | 輕型弓箭手 | `bull/archer/` | ✅ 16 方向 | `bull_archer/` |
+| 🐂 牛人族 | 重型巨斧兵 | `bull/greataxe/` | ✅ 16 方向 | `bull_greataxe/` |
+| 🦌 鹿族 | 輕型彎刀手 | `deer/saber/` | ✅ 16 方向 | `deer_saber/` |
+| 🦌 鹿族 | 輕型長弓兵 | `deer/longbow/` | ✅ 16 方向（右邊的長弓、箭矢 8 視角還沒用） | `deer_longbow/` |
+| 🦌 鹿族 | 輕型鹿角衝撞車 | `deer/ram/` | ✅ 16 方向 | `deer_ram/` |
+| 🦌 鹿族 | 輕型德魯伊 | `deer/druid/` | ✅ 14 方向（只有一邊側面）＋樹根特效 | `deer_druid/`、`effects/roots_1…4.png` |
+| 🐺 狼人族 | 輕型快爪手 | `wolf/claw/` | ✅ 18 方向 | `wolf_claw/` |
+| 🐺 狼人族 | 輕型投石手 | `wolf/slinger/` | ✅ 16 方向（右邊的投石索、石頭特寫還沒用） | `wolf_slinger/` |
+| 🐺 狼人族 | 巨型配重投石機 | `wolf/trebuchet/` | ✅ 14 方向（右邊的石彈、配重特寫還沒用） | `wolf_trebuchet/` |
+| 🐺 狼人族 | 輕型狂化狼人 | `wolf/berserker/` | ✅ 18 方向 | `wolf_berserker/` |
+| 🐟 魚人族 | 輕型魚叉兵 | `fish/harpoon/` | ✅ 14 方向（右邊的魚叉特寫還沒用） | `fish_harpoon/` |
+| 🐟 魚人族 | 輕型魚矛兵 | `fish/spear/` | ✅ 14 方向（半透明白霧底，-MinAlpha 220） | `fish_spear/` |
+| 🐟 魚人族 | 輕型水砲攻城器 | `fish/cannon/` | ✅ 13 方向（右邊的水彈、水花特寫還沒用） | `fish_cannon/` |
+| 🐟 魚人族 | 重型魚人船錨兵 | `fish/anchor/` | ✅ 12 方向 | `fish_anchor/` |
+| 🐂 牛人族 | 重型衝撞車 | `bull/ram/` | ✅ 16 方向（原圖是半透明白底，切的時候去掉） | `bull_ram/` |
 
 ## 每個兵種資料夾
 - 設定圖原檔
@@ -73,10 +93,15 @@
 
 上面最後 6 組是已經去背的橫條圖，用 `tools/split-strip.ps1` 依透明的地方切成三張（順便清掉邊緣的紅色殘影；連在一起時從最空的欄切開）。
 
+豬人族的圖是 2 排的旋轉圖：`tools/split-grid.ps1 -Cols 8,8` 切成一張張（放在 `views/`），再挑 8 個方向複製到 `public/sprites/pig_<名字>/`。
+
 ## 樹木（`props/`）
 - `props/trees/`：16 種樹 → `public/sprites/props/tree_1…16.png`（1–4 綠樹、5–8 秋天、9–12 松樹、13–16 櫻花）
 - `props/orchard/`：16 種果樹 → `fruit_1…16.png`（蘋果、桃、橘、櫻桃，各 4 個樹形）
 - 地圖上的樹林每 7×7 格一區用同一種樹，偶爾夾一棵天然果樹；用 `tools/cutout-props-batch.ps1` 重裁
+- `props/rocks/`：32 種石頭 → `rock_1…32.png`（每 8 個一組：灰石、砂岩、青苔、水晶）；地圖上每 6×6 格一區用同一種
+- `props/ores/`：24 種礦石 → `ore_1…24.png`（鐵、金、煤）；目前只是石頭堆裡偶爾出現的外觀，還不能採
+- 已去背的網格圖用 `tools/split-grid.ps1 -Cols 8,8,8,8` 切
 | 軍營：羊、刺刺、狗、鳥人、樹人、魚人、蛛人、狼人、牛、豬 | `barracks-<族>/` | `barracks_<族>` | 2x2 |
 
 建築只用設定圖上的「45° 俯視（主視角）」一張：`tools/cutout-building.ps1` 裁下來並去背成透明 PNG（背景是模糊的漸層光暈，用「顏色平滑延伸」判斷背景；會丟掉旁邊的標籤碎片和被裁到的細橫線）。

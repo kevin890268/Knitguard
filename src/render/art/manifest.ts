@@ -63,6 +63,31 @@ export const ART_SLOTS: ArtSlot[] = [
   unit('dogcav', '狗狗騎兵', UK.DogCav, 'front', { height: 1.0, bgTolerance: 26 }),
   unit('barker', '吠叫兵', UK.Barker, 'front', { height: 1.0, bgTolerance: 26 }),
   unit('stbernard', '聖伯納救援犬', UK.StBernard, 'front', { height: 1.0, bgTolerance: 26 }),
+  // 豬人族：16 方向旋轉圖（已去背），挑 8 個方向放進 public/sprites/pig_<名字>/（原始切片在 art-src/pig/<名字>/views/）
+  unit('pig_hammer', '槌頭兵', UK.PigHammer, 'front', { height: 1.15 }),
+  unit('pig_crossbow', '弩兵', UK.PigCrossbow, 'front', { height: 1.15 }),
+  unit('pig_giant', '巨槌兵', UK.PigGiant, 'front', { height: 1.15 }),
+  unit('pig_catapult', '豬人投石車', UK.PigCatapult, 'front', { height: 1.05 }),
+  // 牛人族：同樣是 16 方向旋轉圖挑 8 個方向（public/sprites/bull_<名字>/）
+  unit('bull_axe', '輕型斧頭兵', UK.BullAxe, 'front', { height: 1.2 }),
+  unit('bull_archer', '輕型弓箭手', UK.BullArcher, 'front', { height: 1.2 }),
+  unit('bull_greataxe', '重型巨斧兵', UK.BullGreataxe, 'front', { height: 1.2 }),
+  unit('bull_ram', '重型衝撞車', UK.BullRam, 'front', { height: 1.05 }),
+  // 鹿族（德魯伊只有一邊側面，另一邊用鏡像）
+  unit('deer_saber', '輕型彎刀手', UK.DeerSaber, 'front', { height: 1.25 }),
+  unit('deer_longbow', '輕型長弓兵', UK.DeerLongbow, 'front', { height: 1.25 }),
+  unit('deer_ram', '輕型鹿角衝撞車', UK.DeerRam, 'front', { height: 1.05 }),
+  unit('deer_druid', '輕型德魯伊', UK.DeerDruid, 'front', { height: 1.25 }),
+  // 狼人族（快爪手、狂化狼人是 18 方向；投石手、配重投石機的圖右邊有武器特寫，切之前先裁掉）
+  unit('wolf_claw', '輕型快爪手', UK.WolfClaw, 'front', { height: 1.15 }),
+  unit('wolf_slinger', '輕型投石手', UK.WolfSlinger, 'front', { height: 1.15 }),
+  unit('wolf_trebuchet', '巨型配重投石機', UK.WolfTrebuchet, 'front', { height: 1.2 }),
+  unit('wolf_berserker', '輕型狂化狼人', UK.WolfBerserker, 'front', { height: 1.2 }),
+  // 魚人族（三叉戟魚人＝魚矛兵；原圖是半透明白霧底，切的時候 -MinAlpha 220）
+  unit('fish_spear', '輕型魚矛兵', UK.FishSpear, 'front', { height: 1.2 }),
+  unit('fish_harpoon', '輕型魚叉兵', UK.FishHarpoon, 'front', { height: 1.2 }),
+  unit('fish_cannon', '輕型水砲攻城器', UK.FishCannon, 'front', { height: 1.05 }),
+  unit('fish_anchor', '重型魚人船錨兵', UK.FishAnchor, 'front', { height: 1.2 }),
   unit('fuzz', '毛球怪', UK.Fuzz, 'front', { depth: 0.4 }),
   unit('runner', '飛毛蟲', UK.Runner, 'side'),
   unit('brute', '大毛怪', UK.Brute, 'front', { height: 1.3, depth: 0.38 }),

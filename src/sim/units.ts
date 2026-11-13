@@ -33,6 +33,9 @@ export class Units {
   readonly buff: Float32Array;
   /** 被減速剩下的秒數（吠叫、陷阱） */
   readonly slowT: Float32Array;
+  /** 出血：剩下的秒數、每秒傷害 */
+  readonly bleedT: Float32Array;
+  readonly bleedDps: Float32Array;
   /** 刺球衛：是否縮成球、離開戰鬥後多久張開 */
   readonly curled: Uint8Array;
   readonly curlT: Float32Array;
@@ -74,7 +77,7 @@ export class Units {
     this.vx = f(); this.vy = f(); this.hp = f(); this.maxHp = f();
     this.dmg = f(); this.rad = f(); this.cd = f(); this.face = f();
     this.hitT = f(); this.homeX = f(); this.homeY = f();
-    this.buff = f(); this.slowT = f(); this.curlT = f(); this.skillT = f();
+    this.buff = f(); this.slowT = f(); this.bleedT = f(); this.bleedDps = f(); this.curlT = f(); this.skillT = f();
     this.ordX = f(); this.ordY = f(); this.patX = f(); this.patY = f(); this.spdCap = f(); this.waitT = f(); this.bestD = f();
     this.order = new Uint8Array(cap);
     this.hold = new Uint8Array(cap);
@@ -106,11 +109,11 @@ export class Units {
     this.cd[i] = Math.random() * k.attackCd;
     this.face[i] = Math.random() * Math.PI * 2;
     this.hitT[i] = 0;
-    this.buff[i] = this.slowT[i] = this.curlT[i] = this.skillT[i] = 0;
+    this.buff[i] = this.slowT[i] = this.curlT[i] = this.skillT[i] = this.bleedT[i] = this.bleedDps[i] = 0;
     this.curled[i] = 0;
     this.order[i] = this.hold[i] = 0;
     this.ordT[i] = this.path[i] = this.path2[i] = this.grp[i] = -1;
-    this.spdCap[i] = this.waitT[i] = 0;
+    this.spdCap[i] = this.waitT[i] = this.bestD[i] = 0;
     this.gen[i]++;
     this.kind[i] = kind;
     this.team[i] = k.team;

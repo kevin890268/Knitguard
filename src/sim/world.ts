@@ -56,9 +56,11 @@ interface Flight { at: number; i: number; t: number; }
 
 /** 陷阱工程師放的陷阱 */
 export interface Trap { x: number; y: number; owner: number; }
+/** 德魯伊召喚的樹枝：半徑 r 內的敵人每秒受 dps 傷害，t＝剩下的秒數 */
+export interface Thorns { x: number; y: number; r: number; dps: number; t: number; dur: number; team: number; }
 
 /** 一閃而過的範圍效果（吠叫、治療、號角），只給繪圖用 */
-export interface Fx { x: number; y: number; r: number; t: number; kind: 'bark' | 'heal' | 'horn' | 'trap'; }
+export interface Fx { x: number; y: number; r: number; t: number; kind: 'bark' | 'heal' | 'horn' | 'trap' | 'splash'; }
 
 export const MAX_UNITS = 12000;
 
@@ -98,6 +100,7 @@ export class World {
   buildingsVersion = 0;
   shots: Shot[] = [];
   traps: Trap[] = [];
+  thorns: Thorns[] = [];
   fx: Fx[] = [];
   private flights: Flight[] = [];
   /** 自訂每一波的敵人數量（DEMO 用）；沒設定就用公式 */
@@ -491,6 +494,18 @@ export class World {
   towerRange(b: Building): number {
     return (BUILDING_KINDS[b.kind].range ?? 0) + (b.level - 1) * 1.5;
   }
+  /** 狂化狼人：血量低於門檻時狂化（攻擊、移動變快） */
+  raging(i: number): boolean {
+    const s = UNIT_KINDS[this.units.kind[i]].skill;
+    return s?.type === 'rage' && this.units.hp[i] < this.units.maxHp[i] * s.below;
+  }
+
+  /** 深度狂化（血量更低）：攻擊再提高、會回血 */
+  deepRage(i: number): boolean {
+    const s = UNIT_KINDS[this.units.kind[i]].skill;
+    return s?.type === 'rage' && this.units.hp[i] < this.units.maxHp[i] * s.deep;
+  }
+
   /** 軍營下一隻要訓練的兵種 */
   nextTrainee(b: Building): number {
     const t = BUILDING_KINDS[b.kind].trains ?? [UK.Sheep];
@@ -513,6 +528,12 @@ export class World {
     if (!this.map.inBounds(tx, ty)) return undefined;
     const id = this.occ[ty * this.map.w + tx];
     return id >= 0 ? this.byId.get(id) : undefined;
+  }
+
+  /** 直接改了地形（例如 DEMO 清出空地）之後呼叫：重算流場和可走區域 */
+  terrainChanged(): void {
+    this.flowDirty = true;
+    this.recomputeFlow();
   }
 
   isSolid(tx: number, ty: number): boolean {
@@ -856,14 +877,23 @@ export class World {
   private hit(i: number, t: number, ranged: boolean): void {
     const u = this.units, ka = UNIT_KINDS[u.kind[i]], kt = UNIT_KINDS[u.kind[t]];
     let dmg = u.dmg[i] + u.buff[i];
+    if (ka.skill?.type === 'rage' && this.deepRage(i)) dmg *= 1 + ka.skill.dmg;
     if ((kt.armor ?? Armor.Light) === Armor.Heavy) dmg += ka.bonusHeavy ?? 0;
     else dmg += ka.bonusLight ?? 0;
     if (u.rad[t] >= 0.45) dmg += ka.bonusLarge ?? 0;
     let def = ranged ? kt.rangedDef ?? 0 : kt.meleeDef ?? 0;
     const curl = kt.skill?.type === 'curl' && u.curled[t] ? kt.skill : null;
     if (curl) def += curl.def;
+    // 快爪手的飛撲：跑起來後的第一下多一些傷害（skillT＝已經跑了幾秒，它沒有別的技能，借來用）
+    if (ka.skill?.type === 'pounce' && !ranged && u.skillT[i] >= ka.skill.run) {
+      dmg += ka.skill.bonus;
+      this.fx.push({ x: u.x[t], y: u.y[t], r: 0.45, t: 0.25, kind: 'horn' });
+    }
+    if (ka.skill?.type === 'pounce') u.skillT[i] = 0;
     u.hp[t] -= Math.max(1, dmg - def);
     u.hitT[t] = 0.12;
+    if (ka.skill?.type === 'anchor') u.slowT[t] = SLOW.dur; // 船錨：拖慢
+    if (ka.bleed) { u.bleedT[t] = Math.max(u.bleedT[t], ka.bleed.dur); u.bleedDps[t] = Math.max(u.bleedDps[t], ka.bleed.dps); } // 魚人族：出血
     if (curl && !ranged) { u.hp[i] -= curl.reflect; u.hitT[i] = 0.12; }
   }
 
@@ -903,7 +933,19 @@ export class World {
     const u = this.units;
     this.flights = this.flights.filter((f) => {
       if (f.at > this.time) return true;
-      if (u.alive[f.i] && u.alive[f.t] && u.team[f.i] !== u.team[f.t]) this.hit(f.i, f.t, true);
+      const sk = u.alive[f.i] ? UNIT_KINDS[u.kind[f.i]].skill : undefined;
+      if (sk?.type === 'splash' && u.alive[f.i]) {
+        // 水砲：落點周圍的敵人都受傷（目標死了也照樣濺開，落點用目標最後的位置）
+        const x = u.x[f.t], y = u.y[f.t];
+        const n = this.hash.queryInto(x, y, sk.radius, this.tmp);
+        for (let q = 0; q < n; q++) {
+          const j = this.tmp[q];
+          if (!u.alive[j] || u.team[j] === u.team[f.i]) continue;
+          if ((u.x[j] - x) ** 2 + (u.y[j] - y) ** 2 > sk.radius * sk.radius) continue;
+          this.hit(f.i, j, true);
+        }
+        this.fx.push({ x, y, r: sk.radius, t: 0.35, kind: 'splash' });
+      } else if (u.alive[f.i] && u.alive[f.t] && u.team[f.i] !== u.team[f.t]) this.hit(f.i, f.t, true);
       return false;
     });
   }
@@ -915,12 +957,20 @@ export class World {
       if (!u.alive[i]) continue;
       u.buff[i] = 0;
       if (u.slowT[i] > 0) u.slowT[i] -= dt;
+      if (u.bleedT[i] > 0) {
+        u.hp[i] -= u.bleedDps[i] * dt;
+        if ((u.bleedT[i] -= dt) <= 0) u.bleedDps[i] = 0;
+      }
     }
     for (let i = 0; i < u.hi; i++) {
       if (!u.alive[i]) continue;
       const s = UNIT_KINDS[u.kind[i]].skill;
       if (!s) continue;
       const x = u.x[i], y = u.y[i], team = u.team[i];
+      if (s.type === 'rage') {
+        if (this.deepRage(i)) u.hp[i] = Math.min(u.maxHp[i], u.hp[i] + s.regen * dt);
+        continue;
+      }
       if (s.type === 'horn') {
         const n = this.hash.queryInto(x, y, s.radius, this.tmp);
         let fighting = false;
@@ -957,6 +1007,22 @@ export class World {
           this.fx.push({ x: u.x[best], y: u.y[best], r: 0.5, t: 0.4, kind: 'heal' });
           u.skillT[i] = s.cd;
         } else u.skillT[i] = 0.3;
+      } else if (s.type === 'thorns') {
+        if ((u.skillT[i] -= dt) > 0) continue;
+        u.skillT[i] = 0.4;
+        // 射程內離自己最近的敵人，在它腳下長出樹枝
+        const n = this.hash.queryInto(x, y, s.range, this.tmp);
+        let best = -1, bd = s.range * s.range;
+        for (let q = 0; q < n; q++) {
+          const j = this.tmp[q];
+          if (!u.alive[j] || u.team[j] === team) continue;
+          const d2 = (u.x[j] - x) ** 2 + (u.y[j] - y) ** 2;
+          if (d2 < bd) { bd = d2; best = j; }
+        }
+        if (best < 0) continue;
+        u.face[i] = Math.atan2(u.x[best] - x, u.y[best] - y);
+        this.thorns.push({ x: u.x[best], y: u.y[best], r: s.radius, dps: s.dps, t: s.dur, dur: s.dur, team });
+        u.skillT[i] = s.cd;
       } else if (s.type === 'trap') {
         if ((u.skillT[i] -= dt) > 0) continue;
         u.skillT[i] = 0.5;
@@ -980,6 +1046,20 @@ export class World {
         this.fx.push({ x: tx, y: ty, r: 0.6, t: 0.3, kind: 'trap' });
         u.skillT[i] = s.cd;
       }
+    }
+    // 樹枝：範圍內的敵人持續受傷
+    if (this.thorns.length) {
+      for (const th of this.thorns) {
+        th.t -= dt;
+        const n = this.hash.queryInto(th.x, th.y, th.r, this.tmp);
+        for (let q = 0; q < n; q++) {
+          const j = this.tmp[q];
+          if (!u.alive[j] || u.team[j] === th.team) continue;
+          if ((u.x[j] - th.x) ** 2 + (u.y[j] - th.y) ** 2 > th.r * th.r) continue;
+          u.hp[j] -= th.dps * dt;
+        }
+      }
+      this.thorns = this.thorns.filter((th) => th.t > 0);
     }
     // 陷阱：敵人踩到就觸發（受傷＋減速），陷阱消失
     if (this.traps.length) {
@@ -1077,7 +1157,7 @@ export class World {
           attacking = true;
           u.face[i] = Math.atan2(ex, ey);
           if (u.cd[i] <= 0) {
-            u.cd[i] = k.attackCd;
+            u.cd[i] = k.attackCd * (this.raging(i) ? 1 - (k.skill as { atkSpeed: number }).atkSpeed : 1);
             if (k.skill?.type === 'pierce') this.pierce(i, t, k.range!, k.skill.width);
             else if (k.skill?.type === 'bark') {
               // 對自己周圍吼叫：範圍內的敵人都變慢，並受到一點傷害
@@ -1098,8 +1178,19 @@ export class World {
         const tx = Math.min(w - 1, Math.max(0, Math.floor(x)));
         const ty = Math.min(h - 1, Math.max(0, Math.floor(y)));
         let fx = flow.dirX[ty * w + tx], fy = flow.dirY[ty * w + tx];
-        if (fx !== 0 || fy !== 0) u.skillT[i] = 0;
-        else {
+        if (fx !== 0 || fy !== 0) {
+          u.skillT[i] = 0;
+          // 卡在窄縫：大隻的（例如大毛怪）擠不過只有一格寬的縫，流場又一直指向那裡。
+          // 4 秒都沒有更接近城堡 → 直接放到流場方向的下一格（前面是建築就不管，讓它去拆）
+          // bestD／waitT 是我方指令用的欄位，敵人沒有指令，借來用（spawn 時 waitT＝0、bestD＝0 → 第一次就會更新）
+          const fd = flow.dist[ty * w + tx];
+          if (u.bestD[i] === 0 || fd < u.bestD[i] - 0.5) { u.bestD[i] = fd; u.waitT[i] = 0; }
+          else if ((u.waitT[i] += dt) > 4) {
+            u.waitT[i] = 0;
+            const nx = tx + Math.sign(Math.round(fx * 1.4)), ny = ty + Math.sign(Math.round(fy * 1.4));
+            if (!this.isSolid(nx, ny) && flow.dist[ny * w + nx] < fd) { u.x[i] = u.px[i] = nx + 0.5; u.y[i] = u.py[i] = ny + 0.5; }
+          }
+        } else {
           // 這格沒有流場方向：可能是被擠進石頭圍住的小空地（從對角的縫鑽進來）。
           // 先找附近走得到城堡的格子脫困；找不到才直直朝城堡走
           const esc = this.escapeDir(x, y);
@@ -1159,6 +1250,7 @@ export class World {
       }
 
       let speed = k.speed;
+      if (this.raging(i)) speed *= 1 + (k.skill as { moveSpeed: number }).moveSpeed;
       // 陣型一起走時配合最慢的單位；快到了才各自加速就位
       if (u.spdCap[i] > 0 && ord !== Ord.Idle && t < 0 && Math.hypot(u.ordX[i] - x, u.ordY[i] - y) > 2.5) speed = Math.min(speed, u.spdCap[i]);
       if (slowed) speed *= 1 - SLOW.move;
@@ -1167,6 +1259,10 @@ export class World {
       u.vy[i] += (dy * speed - u.vy[i]) * blend;
       u.x[i] += u.vx[i] * dt;
       u.y[i] += u.vy[i] * dt;
+      // 快爪手：跑起來就開始蓄飛撲（站著不動不算）
+      if (k.skill?.type === 'pounce' && !attacking) {
+        if (u.vx[i] * u.vx[i] + u.vy[i] * u.vy[i] > k.speed * k.speed * 0.4) u.skillT[i] += dt;
+      }
       if (!attacking && u.vx[i] * u.vx[i] + u.vy[i] * u.vy[i] > 0.04) {
         u.face[i] = lerpAngle(u.face[i], Math.atan2(u.vx[i], u.vy[i]), Math.min(1, dt * 10));
       }

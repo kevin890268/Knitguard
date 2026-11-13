@@ -169,6 +169,9 @@ export class Renderer2D {
    */
   private treeGroups: Sprite[][] = [];
   private fruitSprites: Sprite[] = [];
+  /** 石頭：rock_1…32（每 8 個一組：灰石、砂岩、青苔、水晶）；礦石：ore_1…24（鐵、金、煤，各 8 個）——礦石目前只是外觀 */
+  private rockGroups: Sprite[][] = [];
+  private oreSprites: Sprite[] = [];
   private async loadTreeArt(): Promise<void> {
     const load = (name: string, n: number, wPx: number, ayFrac: number) => Promise.all(Array.from({ length: n }, async (_, i) => {
       const im = await loadImage(`${import.meta.env.BASE_URL}sprites/props/${name}_${i + 1}.png`);
@@ -181,10 +184,14 @@ export class Renderer2D {
       g.drawImage(im, 0, 0, cw, ch);
       return { canvas: c, ax: cw / 2, ay: ch * ayFrac, top: (ch * ayFrac) / SPRITE_SCALE } as Sprite;
     }));
-    const [trees, fruits] = await Promise.all([load('tree', 16, TILE_W * 1.1, 0.93), load('fruit', 16, TILE_W * 1.1, 0.9)]);
-    if (trees.some((s) => !s)) return; // 圖不齊就繼續用程式畫的樹
-    this.treeGroups = [0, 4, 8, 12].map((k) => trees.slice(k, k + 4) as Sprite[]);
-    this.fruitSprites = fruits.filter((s): s is Sprite => !!s);
+    const [trees, fruits, rocks, ores] = await Promise.all([load('tree', 16, TILE_W * 1.1, 0.93), load('fruit', 16, TILE_W * 1.1, 0.9),
+      load('rock', 32, TILE_W * 1.05, 0.85), load('ore', 24, TILE_W * 0.95, 0.85)]);
+    if (!trees.some((s) => !s)) { // 圖不齊就繼續用程式畫的樹
+      this.treeGroups = [0, 4, 8, 12].map((k) => trees.slice(k, k + 4) as Sprite[]);
+      this.fruitSprites = fruits.filter((s): s is Sprite => !!s);
+    }
+    if (!rocks.some((s) => !s)) this.rockGroups = [0, 8, 16, 24].map((k) => rocks.slice(k, k + 8) as Sprite[]);
+    this.oreSprites = ores.filter((s): s is Sprite => !!s);
     if (this.world) this.buildProps();
   }
 
@@ -269,6 +276,12 @@ export class Renderer2D {
         const zone = hash(Math.floor(tx / 7) * 131 + Math.floor(ty / 7) * 977 + 5);
         const group = zone < 0.45 ? 0 : zone < 0.75 ? 2 : zone < 0.9 ? 1 : 3; // 綠樹 45%、松樹 30%、秋天 15%、櫻花 10%
         list = this.fruitSprites.length && hash(i + 9) < 0.06 ? this.fruitSprites : this.treeGroups[group];
+      } else if (t === Tile.Rock && this.rockGroups.length) {
+        // 一片石頭同一種（每 6×6 格一區）：灰石 45%、青苔 30%、砂岩 18%、水晶 7%；偶爾一顆礦石
+        const tx = i % map.w, ty = Math.floor(i / map.w);
+        const zone = hash(Math.floor(tx / 6) * 211 + Math.floor(ty / 6) * 733 + 11);
+        const group = zone < 0.45 ? 0 : zone < 0.75 ? 2 : zone < 0.93 ? 1 : 3;
+        list = this.oreSprites.length && hash(i + 13) < 0.07 ? this.oreSprites : this.rockGroups[group];
       }
       this.props.push({ x, y, sprite: list[Math.floor(hash(i) * list.length)], scale: 0.8 + hash(i + 3) * 0.45, flip: hash(i + 4) > 0.5 });
     }
@@ -389,6 +402,7 @@ export class Renderer2D {
     this.drawGroundMarks(g);
     this.drawUnitMarks(g, alpha);
     this.drawTraps(g);
+    this.drawThorns(g);
 
     // 收集要畫的東西，依「離鏡頭的遠近」（x+y）排序：後面的先畫
     const items: { k: number; draw: () => void }[] = [];
@@ -412,6 +426,8 @@ export class Renderer2D {
     const u = w.units, t = w.time, sel = this.unitSel;
     const bars: [number, number, number][] = [];
     const trapped: [number, number][] = [];
+    const rage: [number, number, number][] = [];
+    const bleeding: [number, number, number][] = [];
     for (let i = 0; i < u.hi; i++) {
       if (!u.alive[i]) continue;
       const x = u.px[i] + (u.x[i] - u.px[i]) * alpha, y = u.py[i] + (u.y[i] - u.py[i]) * alpha;
@@ -429,6 +445,8 @@ export class Renderer2D {
       if (this.unitShadows) shadows.push([sx, sy, kind.radius * 1.3]);
       if (sel && sel[i]) bars.push([sx, sy - sp.top - 4, u.hp[i] / u.maxHp[i]]);
       if (u.team[i] === 0 && w.isTrapped(i)) trapped.push([sx, sy - sp.top - 6]);
+      if (u.bleedT[i] > 0) bleeding.push([sx, sy - sp.top * 0.55, i]);
+      if (kind.skill?.type === 'rage' && w.raging(i)) rage.push([sx, sy, kind.radius * (w.deepRage(i) ? 2.2 : 1.6)]); // 深度狂化：紅光比較大
       items.push({ k: x + y, draw: () => this.drawSprite(g, sp, sx, sy - bob * HEIGHT_PX, 1, false) });
     }
     // 影子（壓扁的橢圓）先畫，所有東西都在影子上面；全部合成一條路徑一次填色（省很多次填色）
@@ -439,6 +457,13 @@ export class Renderer2D {
       g.ellipse(sx, sy, r * PX_PER_UNIT, r * PX_PER_UNIT * 0.5, 0, 0, Math.PI * 2);
     }
     g.fill();
+    // 狂化中的狼人：腳下一圈會脈動的紅光
+    if (rage.length) {
+      g.fillStyle = `rgba(230,50,40,${0.3 + 0.15 * Math.sin(t * 10)})`;
+      g.beginPath();
+      for (const [sx, sy, r] of rage) { g.moveTo(sx + r * PX_PER_UNIT, sy); g.ellipse(sx, sy, r * PX_PER_UNIT, r * PX_PER_UNIT * 0.5, 0, 0, Math.PI * 2); }
+      g.fill();
+    }
     items.sort((a, b) => a.k - b.k);
     for (const it of items) it.draw();
     this.drawn = items.length;
@@ -452,6 +477,19 @@ export class Renderer2D {
       g.fillRect(bx - 11, by - 1, 22, 5);
       g.fillStyle = r > 0.5 ? '#5ad35a' : r > 0.25 ? '#f0c040' : '#e05050';
       g.fillRect(bx - 10, by, 20 * Math.max(0, r), 3);
+    }
+    // 出血中：身上滴紅色的血
+    if (bleeding.length) {
+      g.fillStyle = '#c8202a';
+      g.beginPath();
+      for (const [bx, by, i] of bleeding) {
+        for (let d = 0; d < 2; d++) {
+          const ph = (t * 1.6 + i * 0.37 + d * 0.5) % 1; // 往下滴
+          const dx = (d ? 5 : -4), dy = ph * 14;
+          g.moveTo(bx + dx, by + dy - 3); g.quadraticCurveTo(bx + dx + 2.2, by + dy + 1, bx + dx, by + dy + 2); g.quadraticCurveTo(bx + dx - 2.2, by + dy + 1, bx + dx, by + dy - 3);
+        }
+      }
+      g.fill();
     }
     // 被建築關在中間的單位：頭上顯示「無法移動」
     if (trapped.length) {
@@ -663,13 +701,27 @@ export class Renderer2D {
       const [sx, sy] = at(s, p);
       const [nx, ny] = at(s, Math.min(1, p + 0.03));
       const ang = Math.atan2(ny - sy, nx - sx);
-      const pr = this.projSprites[s.kind];
+      // 投石手的小石頭、配重投石機的大石頭都用石頭的圖，只是大小不同
+      if (s.kind === 'water') {
+        // 水砲的水彈：一團藍色的水，後面拖一點水花
+        g.fillStyle = 'rgba(120,190,250,0.5)';
+        const [bx, by] = at(s, Math.max(0, p - 0.05));
+        g.beginPath(); g.arc(bx, by, 4, 0, Math.PI * 2); g.fill();
+        g.fillStyle = 'rgba(70,150,235,0.95)';
+        g.beginPath(); g.arc(sx, sy, 6, 0, Math.PI * 2); g.fill();
+        g.fillStyle = 'rgba(255,255,255,0.8)';
+        g.beginPath(); g.arc(sx - 2, sy - 2, 2, 0, Math.PI * 2); g.fill();
+        continue;
+      }
+      const rock = s.kind === 'stone' || s.kind === 'pebble' || s.kind === 'boulder';
+      const pr = this.projSprites[rock ? 'stone' : s.kind];
       if (s.kind === 'spike' || !pr) { this.drawSpike(g, sx, sy, ang); continue; }
+      const k = s.kind === 'pebble' ? 0.4 : s.kind === 'boulder' ? 1.6 : 1;
       g.save();
       g.translate(sx, sy);
-      if (s.kind === 'stone') g.rotate(p * 6); // 石頭邊飛邊轉
+      if (rock) g.rotate(p * 6); // 石頭邊飛邊轉
       else g.rotate(ang - pr.angle);
-      g.drawImage(pr.img, -pr.w / 2, -pr.h / 2, pr.w, pr.h);
+      g.drawImage(pr.img, (-pr.w / 2) * k, (-pr.h / 2) * k, pr.w * k, pr.h * k);
       g.restore();
     }
   }
@@ -714,6 +766,46 @@ export class Renderer2D {
   }
 
   /** 地上的陷阱（小小的尖刺板） */
+  /** 德魯伊的樹枝：地上一圈綠棕色，冒出幾根會晃的枝條；快結束時淡掉 */
+  /** 樹根圖（public/sprites/effects/roots_1…4.png）：1–3 生長、4 持續傷害（循環） */
+  private rootImgs: HTMLImageElement[] = [];
+  private rootsLoading = false;
+  private drawThorns(g: CanvasRenderingContext2D): void {
+    const t = this.world.time;
+    if (!this.rootsLoading) {
+      this.rootsLoading = true;
+      void Promise.all([1, 2, 3, 4].map((n) => loadImage(`${import.meta.env.BASE_URL}sprites/effects/roots_${n}.png`)))
+        .then((ims) => { if (ims.every(Boolean)) this.rootImgs = ims as HTMLImageElement[]; });
+    }
+    for (const th of this.world.thorns) {
+      const [sx, sy] = toScreen(th.x, th.y);
+      const a = Math.min(1, th.t / 0.6, (th.dur - th.t) / 0.3 + 0.2);
+      if (this.rootImgs.length) {
+        // 剛長出來的 0.45 秒依序播生長 1→3，之後停在「持續傷害」那張，輕輕閃動
+        const age = th.dur - th.t;
+        const im = this.rootImgs[age < 0.45 ? Math.min(2, Math.floor(age / 0.15)) : 3];
+        const w = th.r * PX_PER_UNIT * 2.1, h = (im.naturalHeight / im.naturalWidth) * w;
+        g.globalAlpha = Math.min(1, th.t / 0.5) * (age < 0.45 ? 1 : 0.85 + 0.15 * Math.sin(t * 6 + th.x));
+        g.drawImage(im, sx - w / 2, sy - h * 0.55, w, h);
+        g.globalAlpha = 1;
+        continue;
+      }
+      const rx = th.r * PX_PER_UNIT, ry = rx * 0.5;
+      g.fillStyle = `rgba(90,120,50,${0.28 * a})`;
+      g.beginPath(); g.ellipse(sx, sy, rx, ry, 0, 0, Math.PI * 2); g.fill();
+      g.strokeStyle = `rgba(110,75,40,${0.9 * a})`;
+      g.lineWidth = 2.5;
+      g.lineCap = 'round';
+      for (let k = 0; k < 7; k++) {
+        const ang = k * 2.39 + th.x, d = 0.25 + ((k * 0.37) % 0.7);
+        const bx = sx + Math.cos(ang) * rx * d, by = sy + Math.sin(ang) * ry * d;
+        const h = 10 + (k % 3) * 4, sway = Math.sin(t * 3 + k) * 3;
+        g.beginPath(); g.moveTo(bx, by); g.quadraticCurveTo(bx + sway, by - h * 0.6, bx + sway * 1.5 + (k % 2 ? 4 : -4), by - h); g.stroke();
+      }
+      g.lineCap = 'butt';
+    }
+  }
+
   private drawTraps(g: CanvasRenderingContext2D): void {
     for (const tr of this.world.traps) {
       const [sx, sy] = toScreen(tr.x, tr.y);
@@ -728,7 +820,7 @@ export class Renderer2D {
 
   /** 一閃而過的範圍效果：吼叫（黃）、治療（綠）、號角（紅）、陷阱觸發（棕） */
   private drawFx(g: CanvasRenderingContext2D): void {
-    const color = { bark: '255,200,60', heal: '90,210,110', horn: '226,75,91', trap: '160,100,50' };
+    const color = { bark: '255,200,60', heal: '90,210,110', horn: '226,75,91', trap: '160,100,50', splash: '80,170,240' };
     for (const f of this.world.fx) {
       const [sx, sy] = toScreen(f.x, f.y);
       const a = Math.min(1, f.t / 0.3);

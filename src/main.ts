@@ -55,7 +55,13 @@ function toolGroup(t: Tool): string {
 const $ = (id: string) => document.getElementById(id)!;
 const app = $('app');
 
-let world = new World(Math.floor(Math.random() * 1e6));
+const PARAMS = new URLSearchParams(location.search);
+const UNIT_DEMO = PARAMS.has('units');
+const BUILDING_DEMO = PARAMS.has('buildings');
+/** 單位圖鑑用小地圖（40×40），其他 DEMO 用一般大小 */
+const GALLERY_SIZE = 40;
+const mapSize = () => (UNIT_DEMO || BUILDING_DEMO ? undefined : GALLERY_SIZE);
+let world = new World(Math.floor(Math.random() * 1e6), mapSize());
 const renderer: AnyRenderer = USE_3D ? new GameRenderer(app, MAX_UNITS) : new Renderer2D(app, MAX_UNITS);
 renderer.setWorld(world);
 const army = new ArmyControl(() => world, renderer, MAX_UNITS);
@@ -80,26 +86,78 @@ let lastSpray = 0;
 /** DEMO：撐過 5 波就贏。網址加 ?dev 顯示開發者沙盒和除錯工具（或按 ` 鍵） */
 const DEV = new URLSearchParams(location.search).has('dev');
 /**
- * DEMO：新兵種每種各 10 隻擺在城堡旁邊，防守 2 波（第 1 波大、第 2 波小）。
- * 排法：近戰最外圈、短程和輔助中間、長程最內圈。
+ * 兵種 DEMO（?units）：八族（羊、刺刺、狗、豬人、牛人、鹿、狼人、魚人）每種兵各 6 隻擺在城堡旁邊，防守 2 波（第 1 波大、第 2 波小）。
+ * 排法：近戰最外圈、衝撞車和短程第二圈、輔助第三圈、長程最內圈。
  */
 const DEMO = {
   waves: [900, 300], // 第 1 波大、第 2 波小
   mix: [0.55, 0.3, 0.15] as [number, number, number], // 毛球怪、飛毛蟲、大毛怪
   firstWave: 25,
   interval: 45,
-  perKind: 10,
+  perKind: 6,
   rings: [
-    { r: 5.4, kinds: [UK.Lancer, UK.Spineball, UK.DogCav] },
-    { r: 4.2, kinds: [UK.Javelin, UK.Barker, UK.Trapper] },
-    { r: 3.4, kinds: [UK.Horn, UK.StBernard] },
-    { r: 2.7, kinds: [UK.Archer, UK.Catapult, UK.Ballista] },
+    { r: 6.2, kinds: [UK.Lancer, UK.Spineball, UK.DogCav, UK.PigHammer, UK.PigGiant, UK.BullAxe, UK.BullGreataxe, UK.DeerSaber, UK.WolfClaw, UK.WolfBerserker, UK.FishSpear, UK.FishAnchor] },
+    { r: 4.9, kinds: [UK.Javelin, UK.Barker, UK.Trapper, UK.BullRam, UK.DeerRam, UK.WolfSlinger, UK.FishHarpoon] },
+    { r: 3.9, kinds: [UK.Horn, UK.StBernard, UK.DeerDruid] },
+    { r: 2.9, kinds: [UK.Archer, UK.Catapult, UK.Ballista, UK.PigCrossbow, UK.PigCatapult, UK.BullArcher, UK.DeerLongbow, UK.WolfTrebuchet, UK.FishCannon] },
   ],
 };
 let started = false;
 
-/** 建築展示（預設）：沒有單位、沒有怪物；市鎮中心五個階段排一排，其他建築每種三個等級。網址加 ?units 回到兵種 DEMO */
-const UNIT_DEMO = new URLSearchParams(location.search).has('units');
+/**
+ * 三種 DEMO（網址決定）：
+ *   預設        單位圖鑑：只有我方單位，一個種族一排、每種兵 3 隻面向鏡頭站好；沒有建築、怪物、波次
+ *   ?units      兵種 DEMO：七族圍在城堡旁防守 2 波
+ *   ?buildings  建築展示：所有建築的每個等級
+ */
+
+/** 單位圖鑑的排法：一個種族一排 */
+const GALLERY: { tribe: string; kinds: number[] }[] = [
+  { tribe: '🐑 羊族', kinds: [UK.Lancer, UK.Archer, UK.Catapult, UK.Horn] },
+  { tribe: '🦔 刺刺族', kinds: [UK.Spineball, UK.Javelin, UK.Ballista, UK.Trapper] },
+  { tribe: '🐕 狗族', kinds: [UK.DogCav, UK.Barker, UK.StBernard] },
+  { tribe: '🐗 豬人族', kinds: [UK.PigHammer, UK.PigCrossbow, UK.PigGiant, UK.PigCatapult] },
+  { tribe: '🐂 牛人族', kinds: [UK.BullAxe, UK.BullArcher, UK.BullGreataxe, UK.BullRam] },
+  { tribe: '🦌 鹿族', kinds: [UK.DeerSaber, UK.DeerLongbow, UK.DeerRam, UK.DeerDruid] },
+  { tribe: '🐺 狼人族', kinds: [UK.WolfClaw, UK.WolfSlinger, UK.WolfTrebuchet, UK.WolfBerserker] },
+  { tribe: '🐟 魚人族', kinds: [UK.FishHarpoon, UK.FishSpear, UK.FishCannon, UK.FishAnchor] },
+];
+
+function setupGallery(w: World): void {
+  w.autoWaves = false;
+  // 小地圖（GALLERY_SIZE），整張清成草地；市鎮中心在正中間（一定要有，被拆就輸），圖鑑排在它前面（畫面下方）
+  const mw = w.map.w;
+  for (let i = 0; i < w.map.tiles.length; i++) {
+    const x = i % mw, y = (i / mw) | 0;
+    w.map.tiles[i] = x === 0 || y === 0 || x === mw - 1 || y === mw - 1 ? Tile.Tree : Tile.Grass; // 邊緣一圈樹當框
+  }
+  w.terrainChanged();
+  // 斜角畫面：x−y 是左右、x+y 是上下 → 一排沿 (1,−1) 方向排開，排與排沿 (1,1) 往下
+  const cx = w.map.baseX + 1.5, cy = w.map.baseY + 1.5;
+  GALLERY.forEach((row, r) => {
+    const n = row.kinds.length * 3;
+    let c = 0;
+    for (const kind of row.kinds) for (let k = 0; k < 3; k++, c++) {
+      const along = (c - (n - 1) / 2) * 0.75 + (Math.floor(c / 3) - (row.kinds.length - 1) / 2) * 0.6; // 同一種兵靠近一點，種類之間空一點
+      const down = 4 + r * 2.9; // 每排之間要夠遠（斜角畫面上往下 1 格只有半格高）
+      const gx = cx + down / 2 + along, gy = cy + down / 2 - along;
+      const i = w.spawnUnitAt(kind, gx, gy);
+      if (i < 0) continue;
+      const u = w.units;
+      u.homeX[i] = gx; u.homeY[i] = gy;
+      u.face[i] = Math.PI / 4; // 面向鏡頭
+      u.hold[i] = 1;
+    }
+  });
+}
+
+/** 單位圖鑑：鏡頭對準圖鑑中間 */
+function lookAtGallery(): void {
+  if (UNIT_DEMO || BUILDING_DEMO) return;
+  const c = world.map.baseX + 1.5 + (4 + (GALLERY.length - 1) * 2.9) / 4;
+  renderer.cam.target.set(c, 0, c);
+}
+
 function setupShowcase(w: World): void {
   w.autoWaves = false;
   w.freeBuild = true;
@@ -148,7 +206,8 @@ function setupShowcase(w: World): void {
 }
 
 function setupWorld(w: World): void {
-  if (!UNIT_DEMO) { setupShowcase(w); return; }
+  if (BUILDING_DEMO) { setupShowcase(w); return; }
+  if (!UNIT_DEMO) { setupGallery(w); return; }
   w.victoryWave = DEMO.waves.length;
   w.waveSizes = DEMO.waves;
   w.waveMix = DEMO.mix;
@@ -172,11 +231,13 @@ function setupWorld(w: World): void {
 }
 setupWorld(world);
 renderer.setWorld(world); // 展示區清過地形，重建樹和石頭
+lookAtGallery();
 
 function newWorld(seed?: number): void {
-  world = new World(seed ?? Math.floor(Math.random() * 1e6));
+  world = new World(seed ?? Math.floor(Math.random() * 1e6), mapSize());
   setupWorld(world);
   renderer.setWorld(world);
+  lookAtGallery();
   army.reset();
   hud.invalidate();
   $('over').style.display = 'none';
@@ -228,7 +289,7 @@ $('titleStart').onclick = () => {
   $('title').style.display = 'none';
   started = true;
 };
-if (!UNIT_DEMO) $('titleStart').click(); // 建築展示：不用標題畫面
+if (!UNIT_DEMO) $('titleStart').click(); // 單位圖鑑、建築展示：不用標題畫面
 
 // ---------------------------------------------------------------- 暫停選單（ESC）
 let pausedBeforeMenu = false;

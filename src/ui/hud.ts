@@ -45,6 +45,11 @@ function skillText(k: UnitKind): string {
     case 'trap': return `🪤 陷阱：每 ${s.cd} 秒放一個地刺（最多 ${s.max} 個），踩到受 ${s.dmg} 傷害並變慢`;
     case 'bark': return `🐕 吠叫：周圍 ${s.radius} 格的敵人移動、攻擊變慢`;
     case 'heal': return `💚 治療：每 ${s.cd} 秒治療附近最需要的隊友 ${s.amount} 血`;
+    case 'splash': return `💦 水花：水彈落地濺開，周圍 ${s.radius} 格的敵人都受傷`;
+    case 'anchor': return '⚓ 船錨：打中的敵人會被拖慢（移動、攻擊變慢）';
+    case 'pounce': return `🐾 飛撲：跑起來後的第一下攻擊 +${s.bonus} 傷害`;
+    case 'rage': return `🐺 狂化：血量低於 ${Math.round(s.below * 100)}% 時攻擊速度 +${Math.round(s.atkSpeed * 100)}%、移動 +${Math.round(s.moveSpeed * 100)}%；低於 ${Math.round(s.deep * 100)}% 時再加攻擊 +${Math.round(s.dmg * 100)}%、每秒回 ${s.regen} 血`;
+    case 'thorns': return `🌿 召喚樹枝：每 ${s.cd} 秒在 ${s.range} 格內的敵人腳下長出樹枝，每秒 ${s.dps} 傷害、持續 ${s.dur} 秒`;
   }
 }
 
@@ -131,7 +136,10 @@ export class Hud {
       const q = this.world.queuedOrders(one).length;
       status = u.order[one] === Ord.Idle && u.hold[one] ? '堅守位置' : ORDER_TEXT[u.order[one]];
       if (u.curled[one]) status += '・縮成刺球';
+      if (this.world.deepRage(one)) status += '・🔥🔥深度狂化（回血中）';
+      else if (this.world.raging(one)) status += '・🔥狂化中';
       if (u.slowT[one] > 0) status += '・被減速';
+      if (u.bleedT[one] > 0) status += '・🩸出血中';
       if (q) status += `（後面還有 ${q} 個指令）`;
     } else if (enemy) status = '敵人';
     else status = `已選 ${ids.length} 隻${counts.size > 1 ? `（${counts.size} 種）` : ''}`;
@@ -153,6 +161,7 @@ export class Hud {
       `<div class="stats">${stats}</div>` +
       (bonus ? `<div class="bonus">💥 ${bonus}</div>` : '') +
       (k.skill ? `<div class="skill">${skillText(k)}</div>` : '') +
+      (k.bleed ? `<div class="skill">🩸 出血：打中的敵人每秒 ${k.bleed.dps} 傷害、持續 ${k.bleed.dur} 秒</div>` : '') +
       `<div class="status">${status}</div></div>`;
   }
 
