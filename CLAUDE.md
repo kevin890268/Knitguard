@@ -9,6 +9,7 @@
 - 技術：TypeScript + Vite；畫面預設是 Canvas 2D 斜角（Three.js 只用來把 3D 模型拍成圖，`?3d` 時才是完整 3D），開發者面板用 lil-gui
 - 執行：`npm run dev`，開啟 http://localhost:5173（`.claude/launch.json` 的 `game` 設定）
 - 檢查：`npm run typecheck`
+- 平衡測試（不開畫面，兩族對打）：`node tools/duel.mjs tribes`／`counters`／`tribe 羊 牛`／`units 長槍兵 狗狗騎兵`／`research`（`src/sim/duel.ts`）
 - Node 裝在 `C:\Program Files\nodejs`（舊的 shell 可能還沒有 PATH）
 
 ## 架構（模擬與繪圖分離）

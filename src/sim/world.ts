@@ -3,6 +3,7 @@ import { GameMap, Tile } from './map';
 import { Units } from './units';
 import { SpatialHash } from './spatialHash';
 import { FlowField } from './flowfield';
+import { RESEARCH_COST, RESEARCH_MAX, RESEARCH_TIME, WAVE_MIX, type ResearchLine } from './data';
 import { Armor, ASSIST, BK, BUILDING_KINDS, ECON, MAX_LEVEL, PLAYER_SIGHT, PROJ, SLOW, SQUAD, Team, UK, UNIT_KINDS, type ProjKind } from './data';
 import { formationSlots, Ord, type CommandType, type Formation, type QueuedOrder } from './orders';
 
@@ -23,7 +24,7 @@ export interface Building {
   /** 城門：開著（我方可以從中間通過） */
   open: boolean;
   /** 進行中的工作（升級；之後的研究、製作也放這裡）。t＝已經做了幾秒，dur＝總共要幾秒 */
-  job: { type: 'upgrade'; label: string; t: number; dur: number; cost: number } | null;
+  job: { type: 'upgrade' | 'research'; label: string; t: number; dur: number; cost: number; line?: ResearchLine } | null;
   /** 軍營：已經訓練過幾隻（決定下一隻是哪個兵種） */
   trained: number;
   hp: number;
@@ -84,6 +85,11 @@ export class World {
   base: Building;
 
   gold = ECON.startGold;
+  /** 兵工廠研究等級（每隊一份）：0～4 */
+  research: Record<ResearchLine, number>[] = [
+    { meleeAtk: 0, rangedAtk: 0, meleeDef: 0, rangedDef: 0 },
+    { meleeAtk: 0, rangedAtk: 0, meleeDef: 0, rangedDef: 0 },
+  ];
   freeBuild = false;
   wave = 0;
   waveInterval = 45;
@@ -105,8 +111,8 @@ export class World {
   private flights: Flight[] = [];
   /** 自訂每一波的敵人數量（DEMO 用）；沒設定就用公式 */
   waveSizes: number[] | null = null;
-  /** 自訂波次的組成比例：[毛球怪, 飛毛蟲, 大毛怪] */
-  waveMix: [number, number, number] = [0.6, 0.3, 0.1];
+  /** 屍潮的組成：[兵種, 比例]（預設見 data.ts 的 WAVE_MIX） */
+  waveMix: [number, number][] = WAVE_MIX;
   spawnPoints: number[] = [];
 
   private costs: Float32Array;
@@ -124,6 +130,8 @@ export class World {
   private spawnQueue: number[] = []; // kind, x, y 三個一組
   private nextBid = 1;
   private tmp = new Int32Array(4096);
+  /** 給 hit() 裡面查周圍用（hit 常在用 tmp 的迴圈裡被呼叫，不能共用） */
+  private tmp2 = new Int32Array(4096);
   private steerOut: [number, number] = [0, 0];
   private rng: Rng;
 
@@ -210,14 +218,11 @@ export class World {
       // 隨機偏移後要確認還走得到城堡：偏移可能把敵人丟進被石頭圍住的封閉小區域，那裡流場沒有方向，敵人會卡住
       const ti = Math.floor(y) * w + Math.floor(x);
       if (this.isSolid(Math.floor(x), Math.floor(y)) || !(this.flow.dist[ti] < Infinity)) { x = (sp % w) + 0.5; y = Math.floor(sp / w) + 0.5; }
-      const r = this.rng.next();
-      let kind: number = UK.Fuzz;
-      if (useMix) {
-        const [, runner, brute] = this.waveMix;
-        if (r < brute) kind = UK.Brute;
-        else if (r < brute + runner) kind = UK.Runner;
-      } else if (this.wave >= 4 && r < 0.05 + this.wave * 0.005) kind = UK.Brute;
-      else if (this.wave >= 2 && r < 0.3) kind = UK.Runner;
+      // 照比例抽兵種（useMix 保留參數：現在一律用 waveMix）
+      void useMix;
+      const total = this.waveMix.reduce((s, [, p]) => s + p, 0);
+      let r = this.rng.next() * total, kind = this.waveMix[0][0];
+      for (const [k, p] of this.waveMix) { if (r < p) { kind = k; break; } r -= p; }
       this.spawnQueue.push(kind, x, y);
     }
   }
@@ -446,6 +451,24 @@ export class World {
     return true;
   }
 
+  /** 研究下一級要多少錢；滿級或正在做別的事 → null */
+  researchCost(b: Building, line: ResearchLine): number | null {
+    if (b.kind !== BK.Arsenal || b.job) return null;
+    const lv = this.research[Team.Player][line];
+    return lv >= RESEARCH_MAX ? null : RESEARCH_COST[lv];
+  }
+
+  /** 兵工廠開始研究（先付錢，花時間才完成） */
+  startResearch(b: Building, line: ResearchLine, label: string): boolean {
+    const cost = this.researchCost(b, line);
+    if (cost === null || !this.canAfford(cost)) return false;
+    if (!this.freeBuild) this.gold -= cost;
+    const lv = this.research[Team.Player][line];
+    b.job = { type: 'research', label: `${label} ${lv + 1} 級`, t: 0, dur: RESEARCH_TIME[lv], cost, line };
+    this.buildingsVersion++;
+    return true;
+  }
+
   /** 取消進行中的工作：全額退錢 */
   cancelJob(b: Building): void {
     if (!b.job) return;
@@ -459,6 +482,7 @@ export class World {
     if (!job) return;
     b.job = null;
     if (job.type === 'upgrade') this.levelUp(b, job.cost);
+    else if (job.type === 'research' && job.line) this.research[Team.Player][job.line]++;
   }
 
   private levelUp(b: Building, cost: number): void {
@@ -494,6 +518,22 @@ export class World {
   towerRange(b: Building): number {
     return (BUILDING_KINDS[b.kind].range ?? 0) + (b.level - 1) * 1.5;
   }
+  /** 巨盾兵的盾牆：t 周圍有己方巨盾兵（不含自己）→ 被遠程打時多的防禦 */
+  private shieldCover(t: number): number {
+    const u = this.units;
+    const n = this.hash.queryInto(u.x[t], u.y[t], 2.5, this.tmp2);
+    let best = 0;
+    for (let q = 0; q < n; q++) {
+      const j = this.tmp2[q];
+      if (j === t || !u.alive[j] || u.team[j] !== u.team[t]) continue;
+      const s = UNIT_KINDS[u.kind[j]].skill;
+      if (s?.type !== 'guard') continue;
+      if ((u.x[j] - u.x[t]) ** 2 + (u.y[j] - u.y[t]) ** 2 > s.radius * s.radius) continue;
+      best = Math.max(best, s.def);
+    }
+    return best;
+  }
+
   /** 狂化狼人：血量低於門檻時狂化（攻擊、移動變快） */
   raging(i: number): boolean {
     const s = UNIT_KINDS[this.units.kind[i]].skill;
@@ -876,12 +916,19 @@ export class World {
    */
   private hit(i: number, t: number, ranged: boolean): void {
     const u = this.units, ka = UNIT_KINDS[u.kind[i]], kt = UNIT_KINDS[u.kind[t]];
-    let dmg = u.dmg[i] + u.buff[i];
+    const ra = this.research[u.team[i]], rt = this.research[u.team[t]];
+    // 武器研究：每一級 + upgAtk（預設 1；攻城器 0）
+    let dmg = u.dmg[i] + u.buff[i] + (ranged ? ra.rangedAtk : ra.meleeAtk) * (ka.upgAtk ?? 1);
     if (ka.skill?.type === 'rage' && this.deepRage(i)) dmg *= 1 + ka.skill.dmg;
+    // 兵種加成（參考世紀帝國 4 的剋制）
     if ((kt.armor ?? Armor.Light) === Armor.Heavy) dmg += ka.bonusHeavy ?? 0;
     else dmg += ka.bonusLight ?? 0;
     if (u.rad[t] >= 0.45) dmg += ka.bonusLarge ?? 0;
-    let def = ranged ? kt.rangedDef ?? 0 : kt.meleeDef ?? 0;
+    if (kt.cavalry) dmg += ka.bonusCav ?? 0;
+    if ((kt.range ?? 0) > 0) dmg += ka.bonusRanged ?? 0;
+    if (kt.wheeled) dmg += ka.bonusSiege ?? 0;
+    let def = (ranged ? kt.rangedDef ?? 0 : kt.meleeDef ?? 0) + (ranged ? rt.rangedDef : rt.meleeDef);
+    if (ranged) def += this.shieldCover(t);
     const curl = kt.skill?.type === 'curl' && u.curled[t] ? kt.skill : null;
     if (curl) def += curl.def;
     // 快爪手的飛撲：跑起來後的第一下多一些傷害（skillT＝已經跑了幾秒，它沒有別的技能，借來用）
@@ -893,6 +940,7 @@ export class World {
     u.hp[t] -= Math.max(1, dmg - def);
     u.hitT[t] = 0.12;
     if (ka.skill?.type === 'anchor') u.slowT[t] = SLOW.dur; // 船錨：拖慢
+    if (ka.slowHit) u.slowT[t] = Math.max(u.slowT[t], ka.slowHit); // 蛛人族：緩速
     if (ka.bleed) { u.bleedT[t] = Math.max(u.bleedT[t], ka.bleed.dur); u.bleedDps[t] = Math.max(u.bleedDps[t], ka.bleed.dps); } // 魚人族：出血
     if (curl && !ranged) { u.hp[i] -= curl.reflect; u.hitT[i] = 0.12; }
   }
@@ -903,6 +951,7 @@ export class World {
     let dx = u.x[t] - x, dy = u.y[t] - y;
     const d = Math.hypot(dx, dy) || 1;
     dx /= d; dy /= d;
+    range = Math.max(range, d + u.rad[t] + 0.5); // 開火距離算上兩邊半徑，刺至少要飛過目標
     const mx = x + dx * range / 2, my = y + dy * range / 2;
     const n = this.hash.queryInto(mx, my, range / 2 + width, this.tmp);
     for (let q = 0; q < n; q++) {
@@ -1083,11 +1132,11 @@ export class World {
   }
 
   /** 附近（由近到遠，最多 6 格）第一圈裡流場距離最短、可走的格子索引；找不到回傳 -1 */
-  private escapeTile(x: number, y: number): number {
+  private escapeTile(x: number, y: number, maxR = 6): number {
     const w = this.map.w, tx0 = Math.floor(x), ty0 = Math.floor(y);
     if (this.buildingAtTile(tx0, ty0) === this.base) return -1;
     let best = -1, bestD = Infinity;
-    for (let r = 1; r <= 6 && best < 0; r++) {
+    for (let r = 1; r <= maxR && best < 0; r++) {
       for (let dy = -r; dy <= r; dy++) for (let dx = -r; dx <= r; dx++) {
         if (Math.max(Math.abs(dx), Math.abs(dy)) !== r) continue; // 只看這一圈
         const tx = tx0 + dx, ty = ty0 + dy;
@@ -1170,6 +1219,18 @@ export class World {
               }
               this.fx.push({ x, y, r: k.skill.radius, t: 0.35, kind: 'bark' });
             } else if (ranged && k.proj) this.launch(i, t, k.proj);
+            else if (k.skill?.type === 'cleave') {
+              // 鏈錘橫掃：目標和它周圍的敵人都挨一下
+              this.hit(i, t, false);
+              const n = this.hash.queryInto(u.x[t], u.y[t], k.skill.radius, this.tmp);
+              for (let q = 0; q < n; q++) {
+                const j = this.tmp[q];
+                if (j === t || !u.alive[j] || u.team[j] === u.team[i]) continue;
+                if ((u.x[j] - u.x[t]) ** 2 + (u.y[j] - u.y[t]) ** 2 > k.skill.radius * k.skill.radius) continue;
+                this.hit(i, j, false);
+              }
+              this.fx.push({ x: u.x[t], y: u.y[t], r: k.skill.radius, t: 0.25, kind: 'trap' });
+            }
             else this.hit(i, t, ranged);
           }
         } else if (holding) u.target[i] = -1; // 堅守：跑出射程就不追
@@ -1199,7 +1260,7 @@ export class World {
             // 卡住偵測：在走不到城堡的格子上待超過 1.5 秒（通常是被擠進對角的縫，出不來）→ 直接移到最近的可達格子
             // 敵人沒有技能，借用 skillT 當計時器
             if ((u.skillT[i] += dt) > 1.5) {
-              const tile = this.escapeTile(x, y);
+              const tile = this.escapeTile(x, y, 40); // 瞬移時找遠一點（被擠進比較大的封閉空地也出得來）
               if (tile >= 0) { u.x[i] = u.px[i] = (tile % w) + 0.5; u.y[i] = u.py[i] = Math.floor(tile / w) + 0.5; }
               u.skillT[i] = 0;
             }
@@ -1218,7 +1279,7 @@ export class World {
             attacking = true;
             u.face[i] = Math.atan2(fx, fy);
             if (u.cd[i] <= 0) {
-              b.hp -= u.dmg[i];
+              b.hp -= u.dmg[i] * (k.bldMul ?? 1); // 骨頭車：拆建築加倍
               b.hitT = 0.12;
               u.cd[i] = k.attackCd;
             }

@@ -36,6 +36,14 @@
 | 🐟 魚人族 | 輕型魚矛兵 | `fish/spear/` | ✅ 14 方向（半透明白霧底，-MinAlpha 220） | `fish_spear/` |
 | 🐟 魚人族 | 輕型水砲攻城器 | `fish/cannon/` | ✅ 13 方向（右邊的水彈、水花特寫還沒用） | `fish_cannon/` |
 | 🐟 魚人族 | 重型魚人船錨兵 | `fish/anchor/` | ✅ 12 方向 | `fish_anchor/` |
+| 🕷️ 蛛人族 | 輕型近戰傘兵 | `spider/drop/` | ✅ 14 方向（白底，-FloodWhite） | `spider_drop/` |
+| 🕷️ 蛛人族 | 輕型遠程蛛網兵 | `spider/web/` | ✅ 14 方向 | `spider_web/` |
+| 🕷️ 蛛人族 | 重型遠程弩砲 | `spider/ballista/` | ✅ 10 方向（兩排分開切；下面一排零件還沒用） | `spider_ballista/` |
+| 🕷️ 蛛人族 | 重型鏈錘兵 | `spider/flail/` | ✅ 14 方向 | `spider_flail/` |
+| 🌳 樹人族 | 重型巨盾兵 | `treant/shield/` | ✅ 12 方向 | `treant_shield/` |
+| 🌳 樹人族 | 重型標槍兵 | `treant/javelin/` | ✅ 7 方向（第二排攻擊動作還沒用） | `treant_javelin/` |
+| 🌳 樹人族 | 重型斧頭車 | `treant/axecart/` | ✅ 11 方向 | `treant_axecart/` |
+| 🌳 樹人族 | 重型巨棒兵 | `treant/club/` | ✅ 7 方向（第二排攻擊動作還沒用） | `treant_club/` |
 | 🐂 牛人族 | 重型衝撞車 | `bull/ram/` | ✅ 16 方向（原圖是半透明白底，切的時候去掉） | `bull_ram/` |
 
 ## 每個兵種資料夾

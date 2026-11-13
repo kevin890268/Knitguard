@@ -5,7 +5,7 @@ import { isTyping } from './render/camera';
 import { makeCutout } from './render/art/imageTo3d';
 import { GameRenderer } from './render/renderer';
 import { Renderer2D } from './render2d/renderer2d';
-import { BK, BUILD_CATS, BUILDING_KINDS, ECON, UK, UNIT_KINDS } from './sim/data';
+import { BK, BUILD_CATS, BUILDING_KINDS, ECON, ENEMY_TRIBES, RESEARCH, RESEARCH_MAX, Team, TRIBES, UK, UNIT_KINDS, type ResearchLine } from './sim/data';
 import { Tile } from './sim/map';
 import { MAX_UNITS, World } from './sim/world';
 import { ArmyControl } from './ui/army';
@@ -58,8 +58,8 @@ const app = $('app');
 const PARAMS = new URLSearchParams(location.search);
 const UNIT_DEMO = PARAMS.has('units');
 const BUILDING_DEMO = PARAMS.has('buildings');
-/** 單位圖鑑用小地圖（40×40），其他 DEMO 用一般大小 */
-const GALLERY_SIZE = 40;
+/** 單位圖鑑用小地圖（48×48），其他 DEMO 用一般大小 */
+const GALLERY_SIZE = 48;
 const mapSize = () => (UNIT_DEMO || BUILDING_DEMO ? undefined : GALLERY_SIZE);
 let world = new World(Math.floor(Math.random() * 1e6), mapSize());
 const renderer: AnyRenderer = USE_3D ? new GameRenderer(app, MAX_UNITS) : new Renderer2D(app, MAX_UNITS);
@@ -86,20 +86,20 @@ let lastSpray = 0;
 /** DEMO：撐過 5 波就贏。網址加 ?dev 顯示開發者沙盒和除錯工具（或按 ` 鍵） */
 const DEV = new URLSearchParams(location.search).has('dev');
 /**
- * 兵種 DEMO（?units）：八族（羊、刺刺、狗、豬人、牛人、鹿、狼人、魚人）每種兵各 6 隻擺在城堡旁邊，防守 2 波（第 1 波大、第 2 波小）。
+ * 兵種 DEMO（?units）：十族（羊、刺刺、狗、豬人、牛人、鹿、狼人、魚人、蛛人、樹人）每種兵各 6 隻擺在城堡旁邊，防守 2 波（第 1 波大、第 2 波小）。
  * 排法：近戰最外圈、衝撞車和短程第二圈、輔助第三圈、長程最內圈。
  */
 const DEMO = {
   waves: [900, 300], // 第 1 波大、第 2 波小
-  mix: [0.55, 0.3, 0.15] as [number, number, number], // 毛球怪、飛毛蟲、大毛怪
+  // 屍潮組成用預設（data.ts 的 WAVE_MIX：骨頭族為主，混一些毛球怪）
   firstWave: 25,
   interval: 45,
   perKind: 6,
   rings: [
-    { r: 6.2, kinds: [UK.Lancer, UK.Spineball, UK.DogCav, UK.PigHammer, UK.PigGiant, UK.BullAxe, UK.BullGreataxe, UK.DeerSaber, UK.WolfClaw, UK.WolfBerserker, UK.FishSpear, UK.FishAnchor] },
-    { r: 4.9, kinds: [UK.Javelin, UK.Barker, UK.Trapper, UK.BullRam, UK.DeerRam, UK.WolfSlinger, UK.FishHarpoon] },
+    { r: 6.2, kinds: [UK.Lancer, UK.Spineball, UK.DogCav, UK.PigHammer, UK.PigGiant, UK.BullAxe, UK.BullGreataxe, UK.DeerSaber, UK.WolfClaw, UK.WolfBerserker, UK.FishSpear, UK.FishAnchor, UK.SpiderDrop, UK.SpiderFlail, UK.TreantShield, UK.TreantClub] },
+    { r: 4.9, kinds: [UK.Javelin, UK.Barker, UK.Trapper, UK.BullRam, UK.DeerRam, UK.WolfSlinger, UK.FishHarpoon, UK.SpiderWeb, UK.TreantJavelin, UK.TreantAxeCart] },
     { r: 3.9, kinds: [UK.Horn, UK.StBernard, UK.DeerDruid] },
-    { r: 2.9, kinds: [UK.Archer, UK.Catapult, UK.Ballista, UK.PigCrossbow, UK.PigCatapult, UK.BullArcher, UK.DeerLongbow, UK.WolfTrebuchet, UK.FishCannon] },
+    { r: 2.9, kinds: [UK.Archer, UK.Catapult, UK.Ballista, UK.PigCrossbow, UK.PigCatapult, UK.BullArcher, UK.DeerLongbow, UK.WolfTrebuchet, UK.FishCannon, UK.SpiderBallista] },
   ],
 };
 let started = false;
@@ -112,16 +112,7 @@ let started = false;
  */
 
 /** 單位圖鑑的排法：一個種族一排 */
-const GALLERY: { tribe: string; kinds: number[] }[] = [
-  { tribe: '🐑 羊族', kinds: [UK.Lancer, UK.Archer, UK.Catapult, UK.Horn] },
-  { tribe: '🦔 刺刺族', kinds: [UK.Spineball, UK.Javelin, UK.Ballista, UK.Trapper] },
-  { tribe: '🐕 狗族', kinds: [UK.DogCav, UK.Barker, UK.StBernard] },
-  { tribe: '🐗 豬人族', kinds: [UK.PigHammer, UK.PigCrossbow, UK.PigGiant, UK.PigCatapult] },
-  { tribe: '🐂 牛人族', kinds: [UK.BullAxe, UK.BullArcher, UK.BullGreataxe, UK.BullRam] },
-  { tribe: '🦌 鹿族', kinds: [UK.DeerSaber, UK.DeerLongbow, UK.DeerRam, UK.DeerDruid] },
-  { tribe: '🐺 狼人族', kinds: [UK.WolfClaw, UK.WolfSlinger, UK.WolfTrebuchet, UK.WolfBerserker] },
-  { tribe: '🐟 魚人族', kinds: [UK.FishHarpoon, UK.FishSpear, UK.FishCannon, UK.FishAnchor] },
-];
+const GALLERY = [...TRIBES, ...ENEMY_TRIBES].map((t) => ({ tribe: t.name, kinds: t.kinds }));
 
 function setupGallery(w: World): void {
   w.autoWaves = false;
@@ -139,11 +130,12 @@ function setupGallery(w: World): void {
     let c = 0;
     for (const kind of row.kinds) for (let k = 0; k < 3; k++, c++) {
       const along = (c - (n - 1) / 2) * 0.75 + (Math.floor(c / 3) - (row.kinds.length - 1) / 2) * 0.6; // 同一種兵靠近一點，種類之間空一點
-      const down = 4 + r * 2.9; // 每排之間要夠遠（斜角畫面上往下 1 格只有半格高）
+      const down = 4 + r * 2.6; // 每排之間要夠遠（斜角畫面上往下 1 格只有半格高）
       const gx = cx + down / 2 + along, gy = cy + down / 2 - along;
       const i = w.spawnUnitAt(kind, gx, gy);
       if (i < 0) continue;
       const u = w.units;
+      u.team[i] = Team.Player; // 敵人（骨頭族）也排進來展示：當成我方，才不會去拆城堡
       u.homeX[i] = gx; u.homeY[i] = gy;
       u.face[i] = Math.PI / 4; // 面向鏡頭
       u.hold[i] = 1;
@@ -154,7 +146,7 @@ function setupGallery(w: World): void {
 /** 單位圖鑑：鏡頭對準圖鑑中間 */
 function lookAtGallery(): void {
   if (UNIT_DEMO || BUILDING_DEMO) return;
-  const c = world.map.baseX + 1.5 + (4 + (GALLERY.length - 1) * 2.9) / 4;
+  const c = world.map.baseX + 1.5 + (4 + (GALLERY.length - 1) * 2.6) / 4;
   renderer.cam.target.set(c, 0, c);
 }
 
@@ -210,7 +202,6 @@ function setupWorld(w: World): void {
   if (!UNIT_DEMO) { setupGallery(w); return; }
   w.victoryWave = DEMO.waves.length;
   w.waveSizes = DEMO.waves;
-  w.waveMix = DEMO.mix;
   w.waveTimer = DEMO.firstWave;
   w.waveInterval = DEMO.interval;
   const cx = w.map.baseX + 1.5, cy = w.map.baseY + 1.5;
@@ -290,6 +281,8 @@ $('titleStart').onclick = () => {
   started = true;
 };
 if (!UNIT_DEMO) $('titleStart').click(); // 單位圖鑑、建築展示：不用標題畫面
+// 單位圖鑑：只看單位，不顯示任何操作介面（資源列、功能表、資訊列、操作說明）
+if (!UNIT_DEMO && !BUILDING_DEMO) document.body.classList.add('gallery');
 
 // ---------------------------------------------------------------- 暫停選單（ESC）
 let pausedBeforeMenu = false;
@@ -339,6 +332,16 @@ const hud = new Hud({
       { icon: '✂️', label: `拆除 +${Math.floor(b.invested * 0.5)}`, key: 'Del', tip: '拆掉，退一半的錢',
         on: () => { world.removeBuilding(b, true); renderer.selected = null; } },
     ];
+    // 兵工廠：四條研究線（0～4 級）
+    if (b.kind === BK.Arsenal) {
+      for (const line of Object.keys(RESEARCH) as ResearchLine[]) {
+        const r = RESEARCH[line], lv = world.research[0][line], c = world.researchCost(b, line);
+        cmds.push({ icon: r.icon, label: lv >= RESEARCH_MAX ? `${r.name} 滿級` : `${r.name} ${lv}→${lv + 1}`, cost: c ?? undefined,
+          tip: line.endsWith('Atk') ? `${r.name}：每一級傷害 +1（重擊兵 +2，攻城器不吃）` : `${r.name}：每一級防禦 +1`,
+          on: () => { world.startResearch(b, line, r.name); hud.invalidate(); },
+          disabled: () => c === null || !world.canAfford(c) });
+      }
+    }
     if (BUILDING_KINDS[b.kind].spawnCap) cmds.push({ icon: '🚩', label: '集結點', tip: '再點地面設集結點（也可以直接右鍵點地面）', on: () => setTool('rally'), active: () => tool === 'rally' });
     return cmds;
   },

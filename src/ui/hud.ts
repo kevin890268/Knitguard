@@ -47,6 +47,8 @@ function skillText(k: UnitKind): string {
     case 'heal': return `💚 治療：每 ${s.cd} 秒治療附近最需要的隊友 ${s.amount} 血`;
     case 'splash': return `💦 水花：水彈落地濺開，周圍 ${s.radius} 格的敵人都受傷`;
     case 'anchor': return '⚓ 船錨：打中的敵人會被拖慢（移動、攻擊變慢）';
+    case 'guard': return `🛡️ 盾牆：周圍 ${s.radius} 格的隊友被遠程打時防禦 +${s.def}`;
+    case 'cleave': return `⛓️ 鏈錘橫掃：連目標周圍 ${s.radius} 格的敵人一起打`;
     case 'pounce': return `🐾 飛撲：跑起來後的第一下攻擊 +${s.bonus} 傷害`;
     case 'rage': return `🐺 狂化：血量低於 ${Math.round(s.below * 100)}% 時攻擊速度 +${Math.round(s.atkSpeed * 100)}%、移動 +${Math.round(s.moveSpeed * 100)}%；低於 ${Math.round(s.deep * 100)}% 時再加攻擊 +${Math.round(s.dmg * 100)}%、每秒回 ${s.regen} 血`;
     case 'thorns': return `🌿 召喚樹枝：每 ${s.cd} 秒在 ${s.range} 格內的敵人腳下長出樹枝，每秒 ${s.dps} 傷害、持續 ${s.dur} 秒`;
@@ -162,6 +164,8 @@ export class Hud {
       (bonus ? `<div class="bonus">💥 ${bonus}</div>` : '') +
       (k.skill ? `<div class="skill">${skillText(k)}</div>` : '') +
       (k.bleed ? `<div class="skill">🩸 出血：打中的敵人每秒 ${k.bleed.dps} 傷害、持續 ${k.bleed.dur} 秒</div>` : '') +
+      (k.sturdy ? '<div class="skill">🌳 樹人：血厚，但移動、攻擊都慢</div>' : '') +
+      (k.slowHit ? `<div class="skill">🕸️ 緩速：打中的敵人移動、攻擊變慢，持續 ${k.slowHit} 秒</div>` : '') +
       `<div class="status">${status}</div></div>`;
   }
 
@@ -180,6 +184,11 @@ export class Hud {
     if (b.kind === BK.Wall) status = '擋住怪物的路';
     if (b.kind === BK.Gate) status = b.open ? '🔓 開著：我方正在通過' : '🔒 關著（我方靠近自動開門，敵人靠近就關）';
     if (b.kind === BK.StoneTower) status = '塔頂 2×2 之後可以放單位';
+    if (b.kind === BK.Arsenal) {
+      const r = w.research[0];
+      lines.push(`<span>🗡️ 近戰武器 ${r.meleeAtk}</span>`, `<span>🏹 遠程武器 ${r.rangedAtk}</span>`, `<span>🛡️ 近戰護甲 ${r.meleeDef}</span>`, `<span>🪖 遠程護甲 ${r.rangedDef}</span>`);
+      status = '研究武器和護甲（每條 0～4 級）';
+    }
     if (!status && !k.range && !k.spawnCap && b.kind !== BK.Base) status = '功能還沒做（目前只有外觀）';
     if (b.job) status = `⏳ ${b.job.label}中…`;
     const img = k.sprite ? `<img class="face" src="${import.meta.env.BASE_URL}sprites/buildings/${k.sprite}_${b.level}.png" alt="" />` : `<div class="face emoji">${k.icon}</div>`;
@@ -194,7 +203,7 @@ export class Hud {
   /** 中：製作／建造／研究的進度（升級、訓練士兵…）；沒有就顯示空的 */
   private buildingWork(b: Building): void {
     const w = this.world, rows: { icon: string; label: string; p: number; right: string; cancel?: boolean }[] = [];
-    if (b.job) rows.push({ icon: '⬆️', label: b.job.label, p: b.job.dur ? b.job.t / b.job.dur : 1, right: `${Math.max(0, Math.ceil(b.job.dur - b.job.t))} 秒`, cancel: true });
+    if (b.job) rows.push({ icon: b.job.type === 'research' ? '🔬' : '⬆️', label: b.job.label, p: b.job.dur ? b.job.t / b.job.dur : 1, right: `${Math.max(0, Math.ceil(b.job.dur - b.job.t))} 秒`, cancel: true });
     if (BUILDING_KINDS[b.kind].spawnCap) {
       const cap = w.barracksCap(b), next = UNIT_KINDS[w.nextTrainee(b)].name;
       rows.push(b.units < cap

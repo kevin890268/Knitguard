@@ -167,3 +167,6 @@ body.demo #stats, body.demo #cmdCard .cmd.debug, body.demo #funcStack .fn.debug 
 
 .lil-gui.root { top: 10px !important; right: 10px !important; }
 @media (max-width: 1250px) { #help { display: none; } }
+
+/* 單位圖鑑（預設 DEMO）：只看單位，操作介面全部藏起來 */
+body.gallery #hud, body.gallery #stats, body.gallery #funcStack, body.gallery #bottomBar, body.gallery #help, body.gallery #dragBox { display: none !important; }

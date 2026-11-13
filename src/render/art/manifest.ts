@@ -88,6 +88,16 @@ export const ART_SLOTS: ArtSlot[] = [
   unit('fish_harpoon', '輕型魚叉兵', UK.FishHarpoon, 'front', { height: 1.2 }),
   unit('fish_cannon', '輕型水砲攻城器', UK.FishCannon, 'front', { height: 1.05 }),
   unit('fish_anchor', '重型魚人船錨兵', UK.FishAnchor, 'front', { height: 1.2 }),
+  // 蛛人族（傘兵原圖是白底，切的時候 -FloodWhite；弩砲兩排連在一起，分開切）
+  unit('spider_drop', '輕型近戰傘兵', UK.SpiderDrop, 'front', { height: 1.1 }),
+  unit('spider_web', '輕型遠程蛛網兵', UK.SpiderWeb, 'front', { height: 1.15 }),
+  unit('spider_ballista', '重型遠程弩砲', UK.SpiderBallista, 'front', { height: 1.1 }),
+  unit('spider_flail', '重型鏈錘兵', UK.SpiderFlail, 'front', { height: 1.15 }),
+  // 樹人族（標槍兵、巨棒兵只取第一排的站姿，第二排是攻擊動作）
+  unit('treant_shield', '重型巨盾兵', UK.TreantShield, 'front', { height: 1.2 }),
+  unit('treant_javelin', '重型標槍兵', UK.TreantJavelin, 'front', { height: 1.25 }),
+  unit('treant_axecart', '重型斧頭車', UK.TreantAxeCart, 'front', { height: 1.1 }),
+  unit('treant_club', '重型巨棒兵', UK.TreantClub, 'front', { height: 1.3 }),
   unit('fuzz', '毛球怪', UK.Fuzz, 'front', { depth: 0.4 }),
   unit('runner', '飛毛蟲', UK.Runner, 'side'),
   unit('brute', '大毛怪', UK.Brute, 'front', { height: 1.3, depth: 0.38 }),

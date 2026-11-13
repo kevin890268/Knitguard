@@ -1,14 +1,15 @@
-param([string]$Sheet, [string]$OutPrefix, [string]$Cols = '8,8', [int]$MinAlpha = 70)
+param([string]$Sheet, [string]$OutPrefix, [string]$Cols = '8,8', [int]$MinAlpha = 70, [switch]$FloodWhite)
+# -FloodWhite: the sheet has an opaque white/light-grey background → flood-fill it from the edges and make it transparent first
 # -MinAlpha: pixels more transparent than this count as background (raise it, e.g. 220, for sheets with a semi-transparent haze)
 # Split a transparent sprite sheet laid out in rows into separate trimmed PNGs, numbered left→right, top→bottom:
 # <OutPrefix>_1.png, _2.png, ...  -Cols = how many objects in each row, e.g. '8,8' or '7,8' or '8,8,8,8'.
 # Rows are found from fully-empty horizontal gaps; objects in a row from empty columns (or, if they touch, the
 # emptiest column near each 1/n point). Also removes faint pixels and the red halo some generators leave.
 Add-Type -AssemblyName System.Drawing
-if (-not ([System.Management.Automation.PSTypeName]'GridSplit2').Type) {
+if (-not ([System.Management.Automation.PSTypeName]'GridSplit3').Type) {
 Add-Type -ReferencedAssemblies System.Drawing -TypeDefinition @"
 using System; using System.Collections.Generic; using System.Drawing; using System.Drawing.Imaging; using System.Runtime.InteropServices;
-public static class GridSplit2 {
+public static class GridSplit3 {
   static List<int[]> Bands(int[] cnt, int n, int minGap, int minLen){
     var bands=new List<int[]>(); int s=-1, gap=0;
     for(int x=0;x<=n;x++){ bool on = x<n && cnt[x]>2;
@@ -16,9 +17,15 @@ public static class GridSplit2 {
       else if(s>=0){ gap++; if(gap>=minGap || x==n){ int e=x-gap; if(e-s>=minLen) bands.Add(new int[]{s,e}); s=-1; gap=0; } } }
     return bands;
   }
-  public static string Run(string sheet, string prefix, int[] cols, int minA){
+  public static string Run(string sheet, string prefix, int[] cols, int minA, bool flood){
     var S=new Bitmap(sheet); int W=S.Width, H=S.Height;
     var bd=S.LockBits(new Rectangle(0,0,W,H),ImageLockMode.ReadOnly,PixelFormat.Format32bppArgb); var px=new int[W*H]; Marshal.Copy(bd.Scan0,px,0,px.Length); S.UnlockBits(bd); S.Dispose();
+    if(flood){ // light, low-saturation background connected to the edges → transparent
+      Func<int,bool> light = i => { int p=px[i]; int a=(p>>24)&255, r=(p>>16)&255, g=(p>>8)&255, b=p&255; int mx=Math.Max(r,Math.Max(g,b)), mn=Math.Min(r,Math.Min(g,b)); return a<70 || (mx>205 && mx-mn<28); };
+      var seen=new bool[W*H]; var st=new Stack<int>();
+      for(int x=0;x<W;x++){ st.Push(x); st.Push((H-1)*W+x); } for(int y=0;y<H;y++){ st.Push(y*W); st.Push(y*W+W-1); }
+      while(st.Count>0){ int i=st.Pop(); if(seen[i]||!light(i)) continue; seen[i]=true; px[i]=0; int x=i%W,y=i/W;
+        if(x>0) st.Push(i-1); if(x<W-1) st.Push(i+1); if(y>0) st.Push(i-W); if(y<H-1) st.Push(i+W); } }
     for(int i=0;i<px.Length;i++){ int p=px[i]; int a=(p>>24)&255, r=(p>>16)&255, g=(p>>8)&255, b=p&255;
       if(a<minA){ px[i]=0; continue; }
       if(a<200 && r>195 && g>195 && b>190){ px[i]=0; continue; } // semi-transparent white haze background
@@ -51,4 +58,4 @@ public static class GridSplit2 {
 }
 "@
 }
-[GridSplit2]::Run($Sheet, $OutPrefix, [int[]]($Cols.Split(',') | ForEach-Object { [int]$_ }), $MinAlpha)
+[GridSplit3]::Run($Sheet, $OutPrefix, [int[]]($Cols.Split(',') | ForEach-Object { [int]$_ }), $MinAlpha, [bool]$FloodWhite)

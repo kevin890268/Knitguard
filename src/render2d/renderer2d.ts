@@ -702,6 +702,16 @@ export class Renderer2D {
       const [nx, ny] = at(s, Math.min(1, p + 0.03));
       const ang = Math.atan2(ny - sy, nx - sx);
       // 投石手的小石頭、配重投石機的大石頭都用石頭的圖，只是大小不同
+      if (s.kind === 'web') {
+        // 蛛網：一團白色的網，邊飛邊轉
+        g.save(); g.translate(sx, sy); g.rotate(p * 8);
+        g.strokeStyle = 'rgba(245,245,250,0.95)'; g.lineWidth = 1.3;
+        g.beginPath();
+        for (let a = 0; a < 6; a++) { const c = Math.cos(a * Math.PI / 3), s2 = Math.sin(a * Math.PI / 3); g.moveTo(0, 0); g.lineTo(c * 7, s2 * 7); }
+        g.moveTo(4, 0); for (let a = 1; a <= 6; a++) g.lineTo(Math.cos(a * Math.PI / 3) * 4, Math.sin(a * Math.PI / 3) * 4);
+        g.stroke(); g.restore();
+        continue;
+      }
       if (s.kind === 'water') {
         // 水砲的水彈：一團藍色的水，後面拖一點水花
         g.fillStyle = 'rgba(120,190,250,0.5)';
