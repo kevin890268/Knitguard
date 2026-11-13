@@ -1,6 +1,6 @@
 import * as THREE from 'three';
-import { BK, BUILDING_KINDS, MAX_LEVEL, PROJ, UNIT_KINDS, type ProjKind } from '../sim/data';
-import { Tile } from '../sim/map';
+import { BK, BUILDING_KINDS, MAX_LEVEL, PROJ, Team, UNIT_KINDS, type ProjKind } from '../sim/data';
+import { Res, Tile } from '../sim/map';
 import type { Building, Shot, World } from '../sim/world';
 import { ArtLibrary } from '../render/art/library';
 import type { ArtSlot } from '../render/art/manifest';
@@ -10,6 +10,9 @@ import { HEIGHT_PX, IsoCamera, PX_PER_UNIT, TILE_H, TILE_W, toScreen } from './i
 import { makeCutout, type Cutout } from '../render/art/imageTo3d';
 import { ART_SLOTS } from '../render/art/manifest';
 import { flipSprite, paintBuilding, paintMonster, paintRock, paintTree, spritesFromViews, VIEW_FILES, type ViewName } from './sprites2d';
+
+/** 德魯伊的樹根特效：先不顯示（改 true 就會畫出來；傷害一直都有算） */
+const SHOW_DRUID_ROOTS = false;
 
 function loadImage(url: string): Promise<HTMLImageElement | null> {
   return new Promise((res) => {
@@ -255,6 +258,7 @@ export class Renderer2D {
     this.chunks.clear();
     this.roadVer = -1;
     this.selected = null;
+    this.selectedDeposit = -1;
     this.buildProps();
     this.cam.bounds = { w: world.map.w, h: world.map.h };
     this.cam.target.set(world.map.baseX + 1.5, 0, world.map.baseY + 1.5);
@@ -270,18 +274,24 @@ export class Renderer2D {
       const x = (i % map.w) + 0.5 + (t === Tile.Tree ? (hash(i + 1) - 0.5) * 0.3 : 0);
       const y = Math.floor(i / map.w) + 0.5 + (t === Tile.Tree ? (hash(i + 2) - 0.5) * 0.3 : 0);
       let list = t === Tile.Tree ? this.treeSprites : this.rockSprites;
+      const res = map.res[i];
       if (t === Tile.Tree && this.treeGroups.length) {
-        // 一片樹林同一種樹（每 7×7 格一區），偶爾夾一棵天然果樹
+        // 果樹聚落：整片都是果樹；其他樹林一片同一種樹（每 7×7 格一區）
         const tx = i % map.w, ty = Math.floor(i / map.w);
         const zone = hash(Math.floor(tx / 7) * 131 + Math.floor(ty / 7) * 977 + 5);
         const group = zone < 0.45 ? 0 : zone < 0.75 ? 2 : zone < 0.9 ? 1 : 3; // 綠樹 45%、松樹 30%、秋天 15%、櫻花 10%
-        list = this.fruitSprites.length && hash(i + 9) < 0.06 ? this.fruitSprites : this.treeGroups[group];
+        list = res === Res.Fruit && this.fruitSprites.length ? this.fruitSprites : this.treeGroups[group];
       } else if (t === Tile.Rock && this.rockGroups.length) {
-        // 一片石頭同一種（每 6×6 格一區）：灰石 45%、青苔 30%、砂岩 18%、水晶 7%；偶爾一顆礦石
-        const tx = i % map.w, ty = Math.floor(i / map.w);
-        const zone = hash(Math.floor(tx / 6) * 211 + Math.floor(ty / 6) * 733 + 11);
-        const group = zone < 0.45 ? 0 : zone < 0.75 ? 2 : zone < 0.93 ? 1 : 3;
-        list = this.oreSprites.length && hash(i + 13) < 0.07 ? this.oreSprites : this.rockGroups[group];
+        // 礦物聚落：鐵礦 ore_1–8、金礦 9–16、煤礦 17–24；石礦用砂岩。
+        // 一般石頭一片同一種（每 6×6 格一區）：灰石 55%、青苔 35%、水晶 10%
+        const ore = res === Res.Iron ? 0 : res === Res.Gold ? 8 : res === Res.Coal ? 16 : -1;
+        if (ore >= 0 && this.oreSprites.length === 24) list = this.oreSprites.slice(ore, ore + 8);
+        else if (res === Res.Stone) list = this.rockGroups[1];
+        else {
+          const tx = i % map.w, ty = Math.floor(i / map.w);
+          const zone = hash(Math.floor(tx / 6) * 211 + Math.floor(ty / 6) * 733 + 11);
+          list = this.rockGroups[zone < 0.55 ? 0 : zone < 0.9 ? 2 : 3];
+        }
       }
       this.props.push({ x, y, sprite: list[Math.floor(hash(i) * list.length)], scale: 0.8 + hash(i + 3) * 0.45, flip: hash(i + 4) > 0.5 });
     }
@@ -403,6 +413,7 @@ export class Renderer2D {
     this.drawUnitMarks(g, alpha);
     this.drawTraps(g);
     this.drawThorns(g);
+    this.drawDepositSel(g, false);
 
     // 收集要畫的東西，依「離鏡頭的遠近」（x+y）排序：後面的先畫
     const items: { k: number; draw: () => void }[] = [];
@@ -437,9 +448,13 @@ export class Renderer2D {
       // 真的在走路才跳：速度要夠快；我方還要有指令、在追敵人或離崗位夠遠（站著被推擠不算）
       const moving = u.vx[i] * u.vx[i] + u.vy[i] * u.vy[i] > 0.4 && (u.team[i] !== 0 || u.order[i] !== 0 || u.target[i] >= 0 ||
         (u.homeX[i] - u.x[i]) ** 2 + (u.homeY[i] - u.y[i]) ** 2 > 0.8);
-      // 走路一跳一跳；有輪子的器具用滑的
-      const bob = moving && !kind.wheeled ? Math.abs(Math.sin(t * 12 + i)) * 0.12 * kind.scale : 0;
-      const dir = ((Math.round(u.face[i] / ((Math.PI * 2) / DIRS)) % DIRS) + DIRS) % DIRS;
+      // 走路一跳一跳；有輪子的器具用滑的。敵人跳一半，大型敵人（半徑 ≥ 0.45）只跳四分之一
+      const bobMul = u.team[i] === Team.Player ? 1 : kind.radius >= 0.45 ? 0.25 : 0.5;
+      const walkBob = moving && !kind.wheeled ? Math.abs(Math.sin(t * 12 + i)) * 0.12 * kind.scale * bobMul : 0;
+      // 會飛的：浮在空中慢慢上下飄（影子留在地上）
+      // 會跳的：走路時一跳一跳（比一般走路的跳動高很多，越過前面的隊伍）
+      const bob = kind.flying ? 0.55 + 0.08 * Math.sin(t * 3 + i) : kind.jumping && moving ? Math.abs(Math.sin(t * 5 + i)) * 0.45 : walkBob;
+      const dir = this.stableDir(i, u.face[i], u.gen[i]);
       const curl = u.curled[i] && this.curlSprites[k];
       const sp = (u.hitT[i] > 0 ? (curl ? this.curlFlash : this.unitFlash) : (curl ? this.curlSprites : this.unitSprites))[k][dir];
       if (this.unitShadows) shadows.push([sx, sy, kind.radius * 1.3]);
@@ -447,7 +462,8 @@ export class Renderer2D {
       if (u.team[i] === 0 && w.isTrapped(i)) trapped.push([sx, sy - sp.top - 6]);
       if (u.bleedT[i] > 0) bleeding.push([sx, sy - sp.top * 0.55, i]);
       if (kind.skill?.type === 'rage' && w.raging(i)) rage.push([sx, sy, kind.radius * (w.deepRage(i) ? 2.2 : 1.6)]); // 深度狂化：紅光比較大
-      items.push({ k: x + y, draw: () => this.drawSprite(g, sp, sx, sy - bob * HEIGHT_PX, 1, false) });
+      items.push({ k: x + y + (kind.flying ? 1.5 : kind.jumping ? 0.6 : 0), // 飛的畫在附近地面單位上面
+        draw: () => this.drawSprite(g, sp, sx, sy - bob * HEIGHT_PX, 1, false) });
     }
     // 影子（壓扁的橢圓）先畫，所有東西都在影子上面；全部合成一條路徑一次填色（省很多次填色）
     g.fillStyle = 'rgba(60,40,30,0.22)';
@@ -471,6 +487,7 @@ export class Renderer2D {
     this.drawShots(g);
     this.drawFx(g);
     this.drawSelectionTop(g);
+    this.drawDepositSel(g, true); // 外框畫在樹和石頭上面，不然被蓋住看不到
     // 選取部隊的血條
     for (const [bx, by, r] of bars) {
       g.fillStyle = 'rgba(0,0,0,0.4)';
@@ -666,6 +683,35 @@ export class Renderer2D {
     }
   }
 
+  /** 選到的資源聚落（−1＝沒有）：地上每一格畫淡黃色菱形（top＝false），整片外框描亮（top＝true，畫在物件上面） */
+  selectedDeposit = -1;
+  private drawDepositSel(g: CanvasRenderingContext2D, top: boolean): void {
+    if (this.selectedDeposit < 0) return;
+    const map = this.world.map, d = map.deposits[this.selectedDeposit];
+    if (!d) { this.selectedDeposit = -1; return; }
+    const pulse = 0.55 + 0.25 * Math.sin(this.world.time * 4);
+    g.save();
+    g.fillStyle = `rgba(255, 220, 90, ${0.28 * pulse})`;
+    g.strokeStyle = `rgba(255, 230, 120, ${pulse})`;
+    g.lineWidth = 3;
+    for (const t of d.tiles) {
+      const x = t % map.w, y = (t / map.w) | 0;
+      const pts = [toScreen(x, y), toScreen(x + 1, y), toScreen(x + 1, y + 1), toScreen(x, y + 1)];
+      g.beginPath();
+      pts.forEach(([px, py], k) => (k ? g.lineTo(px, py) : g.moveTo(px, py)));
+      g.closePath();
+      if (!top) { g.fill(); continue; }
+      // 外框：鄰格不是同一個聚落的邊才描
+      const nb = [[x, y - 1], [x + 1, y], [x, y + 1], [x - 1, y]];
+      for (let e = 0; e < 4; e++) {
+        const [nx, ny] = nb[e];
+        if (map.inBounds(nx, ny) && map.depositOf[ny * map.w + nx] === d.id) continue;
+        g.beginPath(); g.moveTo(pts[e][0], pts[e][1]); g.lineTo(pts[(e + 1) % 4][0], pts[(e + 1) % 4][1]); g.stroke();
+      }
+    }
+    g.restore();
+  }
+
   /** 物件之上的標記：集結旗 */
   private drawSelectionTop(g: CanvasRenderingContext2D): void {
     const s = this.selected;
@@ -775,12 +821,30 @@ export class Renderer2D {
     }
   }
 
+  /**
+   * 畫哪個方向的圖（0–7）。加一點「黏性」：面向要超出目前方向的扇形 20% 才換圖，
+   * 不然面向剛好在兩個方向中間時，圖會一直左右切換（看起來在抖）。
+   */
+  private dirOf = new Int8Array(0);
+  private dirGen = new Uint32Array(0);
+  private stableDir(i: number, face: number, gen: number): number {
+    if (this.dirOf.length <= i) { const n = Math.max(1024, i * 2); const a = new Int8Array(n), b = new Uint32Array(n); a.set(this.dirOf); b.set(this.dirGen); this.dirOf = a; this.dirGen = b; }
+    const f = face / ((Math.PI * 2) / DIRS); // 以扇形為單位
+    const raw = ((Math.round(f) % DIRS) + DIRS) % DIRS;
+    if (this.dirGen[i] !== gen + 1) { this.dirGen[i] = gen + 1; this.dirOf[i] = raw; return raw; }
+    const cur = this.dirOf[i];
+    let diff = f - cur; diff -= Math.round(diff / DIRS) * DIRS; // 和目前方向差幾個扇形（−4…4）
+    if (Math.abs(diff) > 0.7) this.dirOf[i] = raw;
+    return this.dirOf[i];
+  }
+
   /** 地上的陷阱（小小的尖刺板） */
   /** 德魯伊的樹枝：地上一圈綠棕色，冒出幾根會晃的枝條；快結束時淡掉 */
   /** 樹根圖（public/sprites/effects/roots_1…4.png）：1–3 生長、4 持續傷害（循環） */
   private rootImgs: HTMLImageElement[] = [];
   private rootsLoading = false;
   private drawThorns(g: CanvasRenderingContext2D): void {
+    if (!SHOW_DRUID_ROOTS) return; // 先不顯示（傷害照算）
     const t = this.world.time;
     if (!this.rootsLoading) {
       this.rootsLoading = true;

@@ -31,7 +31,7 @@ export interface DuelResult {
 const SIZE = 64;
 
 export function duel(a: DuelSide, b: DuelSide, seed = 1, maxTime = 180): DuelResult {
-  const w = new World(seed, SIZE);
+  const w = new World(seed, SIZE, 'center');
   w.autoWaves = false;
   for (let i = 0; i < w.map.tiles.length; i++) w.map.tiles[i] = Tile.Grass;
   w.terrainChanged();

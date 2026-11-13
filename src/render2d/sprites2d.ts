@@ -45,7 +45,7 @@ export type ViewName = (typeof VIEW_FILES)[number];
  * 每個方向依序嘗試的圖：[檔名, 是否鏡像]。檔名一律以「畫面上臉朝哪邊」為準：
  * front45＝臉朝右下、frontLeft45＝臉朝左下、side＝臉朝右、sideLeft＝臉朝左、back45＝背影往右上、backLeft45＝背影往左上
  */
-const DIR_VIEWS: [ViewName, boolean][][] = [
+export const DIR_VIEWS: [ViewName, boolean][][] = [
   [['frontLeft45', false], ['front45', true], ['front', false]],
   [['front', false]],
   [['front45', false], ['frontLeft45', true], ['front', false]],

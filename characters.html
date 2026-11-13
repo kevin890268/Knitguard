@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>角色圖鑑 · Knitguard</title>
+  <style>
+    :root { --cream: #fbf4ea; --ink: #4a3b33; --stitch: #c9a98a; --accent: #e8798a; --card: #fffaf2; --enemy: #7a4a52; }
+    * { box-sizing: border-box; }
+    body { margin: 0; background: #e9dccb; color: var(--ink); font-family: 'Microsoft JhengHei', 'Noto Sans TC', sans-serif; }
+    header { position: sticky; top: 0; z-index: 5; display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: center;
+      padding: 10px 16px; background: var(--cream); border-bottom: 3px dashed var(--stitch); }
+    header h1 { margin: 0; font-size: 20px; }
+    header .count { color: #8a7666; font-size: 14px; }
+    header .btns { display: flex; flex-wrap: wrap; gap: 6px; margin-left: auto; }
+    button { font: inherit; font-size: 14px; padding: 5px 12px; border-radius: 14px; border: 2px solid var(--stitch); background: #fff; color: var(--ink); cursor: pointer; }
+    button.on { background: var(--accent); border-color: var(--accent); color: #fff; }
+    main { padding: 8px 16px 40px; }
+    section { margin: 18px 0; }
+    section h2 { margin: 0 0 8px; font-size: 18px; display: flex; gap: 8px; align-items: baseline; }
+    section h2 small { font-weight: normal; color: #8a7666; font-size: 13px; }
+    section.enemy h2 { color: var(--enemy); }
+    .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(118px, 1fr)); gap: 8px; }
+    .grid.grid4 { grid-template-columns: repeat(4, minmax(0, 150px)); }
+    .card { background: var(--card); border: 2px dashed var(--stitch); border-radius: 12px; padding: 6px 6px 4px; text-align: center; cursor: pointer; }
+    section.enemy .card { border-color: #c79aa0; }
+    .card:hover { border-style: solid; }
+    .card canvas { width: 100%; height: 112px; display: block; }
+    .card .name { font-size: 13px; line-height: 1.25; min-height: 2.5em; display: flex; flex-direction: column; align-items: center; justify-content: center; }
+    .card .name br { display: none; }
+    .card .tier { color: var(--accent); font-weight: bold; margin-right: 3px; }
+    #big { position: fixed; inset: 0; z-index: 10; display: none; align-items: center; justify-content: center; background: rgba(40, 28, 22, 0.6); padding: 16px; }
+    #big.open { display: flex; }
+    #big .box { background: var(--cream); border-radius: 16px; padding: 14px; max-width: 980px; width: 100%; max-height: 100%; overflow: auto; }
+    #big h3 { margin: 0 0 8px; }
+    #big .dirs { display: grid; grid-template-columns: repeat(auto-fill, minmax(110px, 1fr)); gap: 8px; }
+    #big .dirs div { text-align: center; font-size: 12px; color: #8a7666; }
+    #big .dirs canvas { width: 100%; height: 150px; display: block; background: #f1e6d6; border-radius: 10px; }
+    #big .hint { font-size: 12px; color: #8a7666; margin-top: 8px; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>🧶 角色圖鑑</h1>
+    <span class="count" id="count"></span>
+    <div class="btns">
+      <button data-filter="all" class="on">全部</button>
+      <button data-filter="player">我方十族</button>
+      <button data-filter="enemy">敵人（四階段）</button>
+      <button id="spin" class="on">轉動</button>
+    </div>
+  </header>
+  <main id="list"></main>
+  <div id="big"><div class="box"><h3 id="bigTitle"></h3><div class="dirs" id="bigDirs"></div>
+    <div class="hint">灰字＝這個方向沒有圖，用另一邊鏡像代替（遊戲裡也是這樣）。點外面關閉。</div></div></div>
+  <script type="module" src="/src/characters.ts"></script>
+</body>
+</html>

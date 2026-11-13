@@ -1,5 +1,5 @@
 import { BK, Team } from '../sim/data';
-import { Tile } from '../sim/map';
+import { Res, Tile } from '../sim/map';
 import type { World } from '../sim/world';
 import type { ArmyControl } from './army';
 
@@ -8,6 +8,14 @@ const TILE_RGB: Record<number, [number, number, number]> = {
   [Tile.Rock]: [150, 142, 130],
   [Tile.Tree]: [96, 150, 82],
   [Tile.Water]: [118, 178, 214],
+};
+/** 資源聚落在小地圖上的顏色：石礦米白、鐵礦紅棕、金礦金黃、煤礦黑、果樹桃紅 */
+const RES_RGB: Record<number, [number, number, number]> = {
+  [Res.Stone]: [222, 210, 186],
+  [Res.Iron]: [176, 98, 72],
+  [Res.Gold]: [242, 196, 48],
+  [Res.Coal]: [52, 48, 50],
+  [Res.Fruit]: [236, 120, 150],
 };
 
 interface MinimapView {
@@ -72,8 +80,9 @@ export class Minimap {
     const c = document.createElement('canvas');
     c.width = w; c.height = h;
     const g = c.getContext('2d')!, img = g.createImageData(w, h);
+    const res = world.map.res;
     for (let i = 0; i < w * h; i++) {
-      const [r, gg, b] = TILE_RGB[tiles[i]];
+      const [r, gg, b] = RES_RGB[res[i]] ?? TILE_RGB[tiles[i]];
       img.data.set([r, gg, b, 255], i * 4);
     }
     g.putImageData(img, 0, 0);

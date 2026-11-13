@@ -39,15 +39,33 @@
 | 🕷️ 蛛人族 | 輕型近戰傘兵 | `spider/drop/` | ✅ 14 方向（白底，-FloodWhite） | `spider_drop/` |
 | 🕷️ 蛛人族 | 輕型遠程蛛網兵 | `spider/web/` | ✅ 14 方向 | `spider_web/` |
 | 🕷️ 蛛人族 | 重型遠程弩砲 | `spider/ballista/` | ✅ 10 方向（兩排分開切；下面一排零件還沒用） | `spider_ballista/` |
-| 🕷️ 蛛人族 | 重型鏈錘兵 | `spider/flail/` | ✅ 14 方向 | `spider_flail/` |
+| 🕷️ 蛛人族 | 重型鏈錘兵 | `spider/flail/` | ✅ 14 方向。第一排角色的鏈錘球壓在鄰居腳上切不乾淨，只用第二排（`views/row2_8…14`，`tools/split-touching.ps1` 切）：正面、右前、右側、右後、背面；往左的方向用鏡像 | `spider_flail/` |
 | 🌳 樹人族 | 重型巨盾兵 | `treant/shield/` | ✅ 12 方向 | `treant_shield/` |
 | 🌳 樹人族 | 重型標槍兵 | `treant/javelin/` | ✅ 7 方向（第二排攻擊動作還沒用） | `treant_javelin/` |
 | 🌳 樹人族 | 重型斧頭車 | `treant/axecart/` | ✅ 11 方向 | `treant_axecart/` |
 | 🌳 樹人族 | 重型巨棒兵 | `treant/club/` | ✅ 7 方向（第二排攻擊動作還沒用） | `treant_club/` |
 | 💀 骨頭族（敵人） | 骷髏雜兵、劍兵、弓兵、旗手、骨頭車 | `bone/<grunt,sword,bow,flag,cart>/` | ✅ 只取第一排旋轉圖（劍兵白底 -FloodWhite） | `bone_<名字>/` |
 | 🌱 毛球族（敵人） | 幼毛球、毛球獸、角毛球獸、巨角毛球王 | `enemies/fuzzball/` | ✅ 一張四階段設定圖，每階段 4 個角度（睡覺、倒地、攻擊姿勢、零件還沒用） | `fuzz/`、`runner/`、`fuzz_horn/`、`brute/` |
-| 🚩 七族 | 掌旗手（豬人、牛人、狼人、蛛人、魚人、鹿、樹人） | `flagbearers/` | ✅ 一張七族，每族 6 個角度（大頭像、動作、旗子還沒用） | `flag_<族>/` |
+| 🚩 七族 | 掌旗手（豬人、牛人、狼人、蛛人、魚人、鹿、樹人） | `flagbearers/` | ✅ 一張七族，每族 6 個角度。**2026-11-14 從遊戲移除**（圖還留著，沒有在用） | `flag_<族>/`（沒在用） |
 | 🐂 牛人族 | 重型衝撞車 | `bull/ram/` | ✅ 16 方向（原圖是半透明白底，切的時候去掉） | `bull_ram/` |
+| 👺 哥布林（敵人） | 普通 → 野性 → 狂暴 → 魔化哥布林 | `enemies/goblin/` | ✅ 四階段 × 8 角度 | `goblin_1…4/` |
+| 🐗 墮落豬人族（敵人） | 豬人暴徒 → 獠牙豬人 → 狂暴豬將 → 豬魔霸王 | `enemies/evil-pig/` | ✅ 四階段 × 8 角度 | `evil_pig_1…4/` |
+| 🐂 壞牛人族（敵人） | 牛人暴徒 → 鐵角牛人 → 戰牛勇士 → 牛魔霸主 | `enemies/evil-bull/` | ✅ 四階段 × 8 角度 | `evil_bull_1…4/` |
+| 🌳 樹人雜兵（敵人） | 樹精小兵 → 森林樹兵 → 藤甲樹兵 → 古樹守衛 | `enemies/evil-treant/` | ✅ 四階段 × 8 角度 | `evil_treant_1…4/` |
+| 🌲 壞樹人族（敵人） | 樹靈殘枝 → 腐木樹人 → 荊棘樹魔 → 墮落樹王 | `enemies/evil-treant-2/` | ✅ 四階段 × 8 角度（淺灰底） | `evil_treant2_1…4/` |
+| 🥀 壞樹妖族（敵人） | 樹妖幼體 → 藤蔓樹妖 → 荊棘樹妖 → 墮落樹姬 | `enemies/dryad/` | ✅ 四階段 × 8 角度 | `dryad_1…4/` |
+| 🪨 土巨人族（敵人） | 岩石 → 石護 → 地脈 → 大地巨人 | `enemies/earth-giant/` | ✅ 四階段 × 8 角度 | `earth_giant_1…4/` |
+| 🔥 火人族（敵人） | 火熔人 → 烈炎人 → 火焰戰士 → 炎獄領主 | `enemies/fireling/` | ✅ 四階段 × 8 角度 | `fireling_1…4/` |
+| 🌋 火巨人族（敵人） | 火焰 → 熔岩 → 烈焰 → 黑炎巨人 | `enemies/fire-giant/` | ✅ 四階段 × 8 角度 | `fire_giant_1…4/` |
+| ❄️ 雪怪族（敵人） | 雪幼怪 → 雪毛怪 → 冰角雪怪 → 霜巔巨雪怪 | `enemies/yeti/` | ✅ 四階段 × 8 角度（白底） | `yeti_1…4/` |
+| 🫧 黏黏族（敵人） | 小黏黏 → 膠質 → 酸液 → 變異黏王 | `enemies/slime/` | ✅ 四階段 × 8 角度 | `slime_1…4/` |
+| 🦇 蝙蝠族（敵人） | 小蝙蝠 → 血蝠 → 魔蝠 → 夜幕巨蝠 | `enemies/bat/` | ✅ 四階段 × 8 角度 | `bat_1…4/` |
+| 🧛 吸血鬼族（敵人） | 初階 → 菁英 → 貴族吸血鬼 → 血族始祖 | `enemies/vampire/` | ✅ 四階段 × 8 角度 | `vampire_1…4/` |
+| 🌹 吸血鬼族・少女（敵人） | 吸血少女 → 血裔少女 → 夢魘少女 → 血皇蘿莉 | `enemies/vampire-girl/` | ✅ 四階段 × 8 角度 | `vamp_girl_1…4/` |
+| 😈 惡魔（敵人） | 初階 → 強化 → 魔化 → 魔王惡魔 | `enemies/imp/` | ✅ 四階段 × 7 角度 | `imp_1…4/` |
+| 👿 惡魔第二版（敵人） | 四階段（設定圖沒有名字） | `enemies/imp-2/` | ✅ 四階段 × 7 角度 | `imp2_1…4/` |
+
+敵人都是**四階段**（還沒放進遊戲）。`tools/cutout-enemy-sheets.ps1` 整批重切（`-Only <資料夾>` 只切一張）：去掉左邊的名稱標籤和上面的角度標籤，切成 4 排 × N 欄放進 `views/v_1…`，再照「臉朝畫面哪邊」複製到 `public/sprites/<名字>_<階段>/`（設定圖上的「右側」在畫面上是臉朝左；第一欄「俯角 45°」不用）。魔像那張設定圖已刪掉。
 
 ## 每個兵種資料夾
 - 設定圖原檔
@@ -118,3 +136,12 @@
 建築只用設定圖上的「45° 俯視（主視角）」一張：`tools/cutout-building.ps1` 裁下來並去背成透明 PNG（背景是模糊的漸層光暈，用「顏色平滑延伸」判斷背景；會丟掉旁邊的標籤碎片和被裁到的細橫線）。
 `tools/cutout-buildings-batch.ps1` 記錄每張設定圖三個階段的裁切位置，可以整批重裁（`-Only <資料夾>` 只裁一個）。
 遊戲裡的大小：最高等級的寬度 = 佔地菱形寬 × 1.3，低等級照原圖比例。
+
+## 介面圖（`ui/`）
+- `ui/numbers/<種類>數字.png`：一排「圖示 0–9 + −」→ `public/sprites/ui/numbers/<種類>/icon.png、0…9.png、plus.png、minus.png`（`tools/split-numbers.ps1`）
+  種類：coin 金幣、food 食物、wood 木材、stone 石礦、coal 煤礦、gold_ore 金礦、fire 火焰、freeze 冰凍、wet 潮濕、poison 毒物、bleed 出血、slow 緩速
+- `ui/tech/兵工廠科技.png`：兵工廠科技 6 條 × 3 級 → `public/sprites/ui/tech/<科技>_1…3.png`（含底下的 Ⅰ/Ⅱ/Ⅲ 牌子）
+  melee_weapon 近戰武器、armor 護甲、ranged_weapon 遠程武器、ranged_armor 遠程護甲、forge 鍛造、metal 金屬
+
+## 角色圖鑑
+`npm run dev` 後開 `/characters.html`（遊戲本體是首頁；`?gallery` 單位圖鑑、`?enemies` 敵人圖鑑、`?buildings` 建築展示）：所有角色（我方十族、敵人）原地轉一圈；敵人每族四階段一排。點卡片看 8 個方向（灰字＝那個方向沒圖，用另一邊鏡像）。

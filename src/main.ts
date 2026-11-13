@@ -56,14 +56,20 @@ const $ = (id: string) => document.getElementById(id)!;
 const app = $('app');
 
 const PARAMS = new URLSearchParams(location.search);
-const UNIT_DEMO = PARAMS.has('units');
 const BUILDING_DEMO = PARAMS.has('buildings');
 /** ?enemies：敵人圖鑑（只排敵人，介面藏起來；和單位圖鑑同一套） */
 const ENEMY_DEMO = PARAMS.has('enemies');
-/** 單位圖鑑用小地圖（48×48），其他 DEMO 用一般大小 */
-const GALLERY_SIZE = 48;
+/** ?gallery：單位圖鑑（我方十族＋敵人，介面藏起來） */
+const GALLERY_DEMO = PARAMS.has('gallery') || ENEMY_DEMO;
+/** 預設（或 ?units）：遊戲本體——兵種 DEMO，有完整介面 */
+const UNIT_DEMO = !GALLERY_DEMO && !BUILDING_DEMO;
+/** 單位圖鑑用小地圖（至少 48×48，排數多就放大到放得下），其他 DEMO 用一般大小 */
+const GALLERY_ROWS = ENEMY_DEMO ? ENEMY_TRIBES.length : TRIBES.length + ENEMY_TRIBES.length;
+const GALLERY_SIZE = Math.max(48, Math.ceil(ENEMY_DEMO ? 6.5 + (GALLERY_ROWS - 1) * 3.8 : 4 + (GALLERY_ROWS - 1) * 2.6) + 28);
 const mapSize = () => (UNIT_DEMO || BUILDING_DEMO ? undefined : GALLERY_SIZE);
-let world = new World(Math.floor(Math.random() * 1e6), mapSize());
+/** 遊戲本體：市鎮中心在最下方；圖鑑、展示：在正中間 */
+const mapLayout = (): 'south' | 'center' => (UNIT_DEMO ? 'south' : 'center');
+let world = new World(Math.floor(Math.random() * 1e6), mapSize(), mapLayout());
 const renderer: AnyRenderer = USE_3D ? new GameRenderer(app, MAX_UNITS) : new Renderer2D(app, MAX_UNITS);
 renderer.setWorld(world);
 const army = new ArmyControl(() => world, renderer, MAX_UNITS);
@@ -88,18 +94,20 @@ let lastSpray = 0;
 /** DEMO：撐過 5 波就贏。網址加 ?dev 顯示開發者沙盒和除錯工具（或按 ` 鍵） */
 const DEV = new URLSearchParams(location.search).has('dev');
 /**
- * 兵種 DEMO（?units）：十族（羊、刺刺、狗、豬人、牛人、鹿、狼人、魚人、蛛人、樹人）每種兵各 6 隻擺在城堡旁邊，防守 2 波（第 1 波大、第 2 波小）。
- * 排法：近戰最外圈、衝撞車和短程第二圈、輔助第三圈、長程最內圈。
+ * 兵種 DEMO（預設／?units）：十族（羊、刺刺、狗、豬人、牛人、鹿、狼人、魚人、蛛人、樹人）每種兵各 6 隻擺在城堡旁邊，防守 1 波大的。
+ * 排法：近戰最外圈、短程第二圈、輔助第三圈、長程最內圈。
+ * 我方先不放攻城武器（有輪子的：投石車、弩砲、衝撞車、斧頭車、水砲…），敵人的照舊。
  */
 const DEMO = {
-  waves: [900, 300], // 第 1 波大、第 2 波小
+  waves: [1170], // 只有一波，原本第一波 900 隻 × 1.3
   // 屍潮組成用預設（data.ts 的 WAVE_MIX：骨頭族為主，混一些毛球族）
-  firstWave: 25,
+  // 地圖 256×256、敵人從上方邊緣走到最下方的市鎮中心要 100–160 秒 → 開場 3 秒就出第一波（約 2 分鐘後抵達）
+  firstWave: 3,
   interval: 45,
   perKind: 6,
   rings: [
     { r: 6.2, kinds: [UK.Lancer, UK.Spineball, UK.DogCav, UK.PigHammer, UK.PigGiant, UK.BullAxe, UK.BullGreataxe, UK.DeerSaber, UK.WolfClaw, UK.WolfBerserker, UK.FishSpear, UK.FishAnchor, UK.SpiderDrop, UK.SpiderFlail, UK.TreantShield, UK.TreantClub] },
-    { r: 4.9, kinds: [UK.Javelin, UK.Barker, UK.Trapper, UK.BullRam, UK.DeerRam, UK.WolfSlinger, UK.FishHarpoon, UK.SpiderWeb, UK.TreantJavelin, UK.TreantAxeCart] },
+    { r: 4.9, kinds: [UK.Javelin, UK.Barker, UK.BullRam, UK.DeerRam, UK.WolfSlinger, UK.FishHarpoon, UK.SpiderWeb, UK.TreantJavelin, UK.TreantAxeCart] },
     { r: 3.9, kinds: [UK.Horn, UK.StBernard, UK.DeerDruid] },
     { r: 2.9, kinds: [UK.Archer, UK.Catapult, UK.Ballista, UK.PigCrossbow, UK.PigCatapult, UK.BullArcher, UK.DeerLongbow, UK.WolfTrebuchet, UK.FishCannon, UK.SpiderBallista] },
   ],
@@ -108,9 +116,9 @@ let started = false;
 
 /**
  * 三種 DEMO（網址決定）：
- *   預設        單位圖鑑：只有我方單位，一個種族一排、每種兵 3 隻面向鏡頭站好；沒有建築、怪物、波次
- *   ?units      兵種 DEMO：七族圍在城堡旁防守 2 波
- *   ?buildings  建築展示：所有建築的每個等級
+ *   預設（?units）  遊戲本體／兵種 DEMO：十族圍在城堡旁防守 2 波，有完整介面（資訊列、功能表）
+ *   ?gallery        單位圖鑑：一個種族一排、每種兵 3 隻面向鏡頭站好；沒有介面、波次（?enemies 只排敵人）
+ *   ?buildings      建築展示：所有建築的每個等級
  */
 
 /** 單位圖鑑的排法：一個種族一排 */
@@ -209,7 +217,8 @@ function setupWorld(w: World): void {
   w.waveTimer = DEMO.firstWave;
   w.waveInterval = DEMO.interval;
   const cx = w.map.baseX + 1.5, cy = w.map.baseY + 1.5;
-  for (const ring of DEMO.rings) {
+  for (const ring0 of DEMO.rings) {
+    const ring = { r: ring0.r, kinds: ring0.kinds.filter((k) => !UNIT_KINDS[k].wheeled) }; // 先不放攻城武器
     const n = ring.kinds.length * DEMO.perKind;
     for (let s = 0; s < n; s++) {
       const kind = ring.kinds[s % ring.kinds.length]; // 不同兵種交錯排
@@ -229,7 +238,7 @@ renderer.setWorld(world); // 展示區清過地形，重建樹和石頭
 lookAtGallery();
 
 function newWorld(seed?: number): void {
-  world = new World(seed ?? Math.floor(Math.random() * 1e6), mapSize());
+  world = new World(seed ?? Math.floor(Math.random() * 1e6), mapSize(), mapLayout());
   setupWorld(world);
   renderer.setWorld(world);
   lookAtGallery();
@@ -319,6 +328,8 @@ const hud = new Hud({
   army,
   getBuilding: () => renderer.selected,
   setBuilding: (b) => { renderer.selected = b; },
+  getDeposit: () => renderer.selectedDeposit,
+  setDeposit: (d) => { renderer.selectedDeposit = d; },
   portrait: (k) => renderer.portrait(k),
   // 沒選東西：指令卡空著（建造在上面的功能表）
   buildCmds: () => [],
@@ -458,9 +469,10 @@ addEventListener('pointerup', (e) => {
   }
 });
 
-/** 左鍵點一下：單位 → 選單位（雙擊或 Ctrl 選同兵種）；不然選建築 */
+/** 左鍵點一下：單位 → 選單位（雙擊或 Ctrl 選同兵種）；不然選建築；再不然選資源聚落（礦、果樹） */
 function clickSelect(cx: number, cy: number, shift: boolean, ctrl: boolean): void {
   const i = army.pickUnit(cx, cy);
+  if (!shift) renderer.selectedDeposit = -1;
   const u = world.units;
   if (i >= 0 && u.team[i] === 0) {
     const now = performance.now();
@@ -477,6 +489,8 @@ function clickSelect(cx: number, cy: number, shift: boolean, ctrl: boolean): voi
   army.setSelection([], false);
   const h = hoverTile(1);
   renderer.selected = h ? world.buildingAtTile(h.tx, h.ty) ?? null : null;
+  // 點到石頭／樹（圖比格子高，點到圖的上半部也算）→ 選那一整個聚落
+  if (!renderer.selected && h) renderer.selectedDeposit = world.map.depositNear(h.tx, h.ty);
 }
 
 /** 右鍵點一下：部隊 → 移動／攻擊；兵營 → 設集結點 */
@@ -595,7 +609,9 @@ addEventListener('keydown', (e) => {
     // ESC：先取消「等待點地面的指令」或建造工具；沒有可以取消的就打開暫停選單
     if (army.mode) { army.mode = null; return; }
     if (tool !== 'select') { setTool('select'); return; }
-    if (army.sel.length || army.inspect >= 0 || renderer.selected) { army.setSelection([], false); renderer.selected = null; return; }
+    if (army.sel.length || army.inspect >= 0 || renderer.selected || renderer.selectedDeposit >= 0) {
+      army.setSelection([], false); renderer.selected = null; renderer.selectedDeposit = -1; return;
+    }
     if (started && !world.gameOver && !world.victory) setPauseMenu(true);
   }
   else if (k === ' ') { e.preventDefault(); if (started && UNIT_DEMO) world.spawnWave(); }
@@ -612,7 +628,8 @@ function updatePanels(): void {
   $('hBase').textContent = `${Math.ceil(world.base.hp)}/${world.base.maxHp}`;
   $('hWave').textContent = world.victoryWave ? `${world.wave} / ${world.victoryWave}` : String(world.wave);
   const lastWave = world.victoryWave > 0 && world.wave >= world.victoryWave;
-  $('hNext').textContent = lastWave ? `最後一波！剩 ${world.enemyCount + world.pendingSpawns} 隻`
+  const tribe = world.waveTribe ? `（${world.waveTribe}）` : '';
+  $('hNext').textContent = lastWave ? `最後一波${tribe}！剩 ${world.enemyCount + world.pendingSpawns} 隻`
     : !started ? '準備中' : world.autoWaves ? `下一波 ${Math.ceil(world.waveTimer)}s` : '自動波次關閉';
   $('hKills').textContent = String(world.kills);
   const s = loop.stats;

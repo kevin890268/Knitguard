@@ -39,7 +39,7 @@ export class IsoCamera {
   zoom = 1;
   minZoom = 0.35;
   maxZoom = 2.2;
-  bounds = { w: 96, h: 96 };
+  bounds = { w: 256, h: 256 };
   /** 相容 3D 鏡頭的欄位（main.ts 用它設定開場位置） */
   readonly target = { set: (x: number, _y: number, z: number) => { this.cx = x; this.cy = z; } };
 

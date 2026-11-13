@@ -13,7 +13,7 @@ export const Armor = { Light: 0, Heavy: 1 } as const;
  *   horn    號角手：附近我方攻擊 +atk（不疊加，取最大）
  *   curl    刺球衛：附近有敵人就自動縮球；縮著時防禦 +def、移動 ×(1−slow)、近戰打它的敵人受 reflect 反傷
  *   pierce  尖刺弩砲：射出的刺沿直線貫穿，打到線上 width 範圍內的所有敵人
- *   trap    陷阱工程師：每 cd 秒在敵人來的方向放一個陷阱（最多 max 個）；踩到受 dmg 傷害並變慢
+ *   trap    陷阱工程師（村民，不攻擊）：每 cd 秒在敵人來的方向放一個陷阱（最多 max 個）；踩到受 dmg 傷害並變慢
  *   bark    吠叫兵：攻擊時對自己周圍 radius 內的敵人吼叫，讓它們變慢（移動、攻擊速度）
  *   heal    聖伯納救援犬：每 cd 秒治療範圍內最需要的我方 amount 血
  *   splash  水砲攻城器：水彈落地時，半徑 radius 內的敵人都受傷害
@@ -108,10 +108,16 @@ export interface UnitKind {
   bldMul?: number;
   /** 不主動攻擊，只待在崗位上（號角手、救援犬） */
   support?: boolean;
+  /** 村民（不算戰鬥兵、不攻擊、不跟著小隊去打架；例如陷阱工程師） */
+  villager?: boolean;
   /** 遠程丟出去的東西（畫面上會飛過去，飛到才扣血） */
   proj?: ProjKind;
   /** 有輪子的器具（投石車、弩砲）：移動時用滑的，不像步兵一跳一跳 */
   wheeled?: boolean;
+  /** 會飛（蝙蝠、惡魔）：不和地面單位互相推擠，從上面越過去，用自己的速度走（不跟著群組行軍速度）；畫面上浮在空中 */
+  flying?: boolean;
+  /** 會跳（毛球族）：一跳一跳越過其他地面單位，和會飛的一樣不推擠、照自己的速度走 */
+  jumping?: boolean;
 }
 
 export const UK = {
@@ -130,17 +136,15 @@ export const UK = {
   BoneGrunt: 43, BoneSword: 44, BoneBow: 45, BoneFlag: 46, BoneCart: 47,
   // 毛球族第三階段（第一、二、四階段是最上面的 Fuzz、Runner、Brute）
   HornFuzz: 48,
-  // 各族掌旗手（輔助：周圍隊友攻擊 +2，和號角手一樣）
-  FlagPig: 49, FlagBull: 50, FlagWolf: 51, FlagSpider: 52, FlagFish: 53, FlagDeer: 54, FlagTreant: 55,
 } as const;
 
 const P = Team.Player, L = Armor.Light, H = Armor.Heavy;
 export const UNIT_KINDS: UnitKind[] = [
   // ---- 敵人
   // ---- 敵人：毛球族（會進化的野怪，四個階段：幼毛球 → 毛球獸 → 角毛球獸 → 巨角毛球王；階段越高越大、越耐打、撞得越痛）
-  { name: '幼毛球', team: Team.Enemy, hp: 30, speed: 1.7, radius: 0.28, damage: 3, attackCd: 1, reach: 0.1, aggro: 3.5, reward: 1, color: 0xefe6d0, scale: 0.5, model: 'monster', armor: L },
-  { name: '毛球獸', team: Team.Enemy, hp: 70, speed: 2.4, radius: 0.32, damage: 7, attackCd: 1.1, reach: 0.12, aggro: 4, reward: 2, color: 0xa9c46a, scale: 0.62, model: 'monster', armor: L },
-  { name: '巨角毛球王', team: Team.Enemy, hp: 420, speed: 1.1, radius: 0.58, damage: 28, attackCd: 1.8, reach: 0.2, aggro: 3.5, reward: 15, color: 0x7a9a4a, scale: 1.2, model: 'monster', armor: H, meleeDef: 2, rangedDef: 2 },
+  { name: '幼毛球', team: Team.Enemy, hp: 30, speed: 1.7, radius: 0.28, damage: 3, attackCd: 1, reach: 0.1, aggro: 3.5, reward: 1, color: 0xefe6d0, scale: 0.5, model: 'monster', armor: L, jumping: true },
+  { name: '毛球獸', team: Team.Enemy, hp: 70, speed: 2.4, radius: 0.32, damage: 7, attackCd: 1.1, reach: 0.12, aggro: 4, reward: 2, color: 0xa9c46a, scale: 0.62, model: 'monster', armor: L, jumping: true },
+  { name: '巨角毛球王', team: Team.Enemy, hp: 420, speed: 1.1, radius: 0.58, damage: 28, attackCd: 1.8, reach: 0.2, aggro: 3.5, reward: 15, color: 0x7a9a4a, scale: 1.2, model: 'monster', armor: H, meleeDef: 2, rangedDef: 2, jumping: true },
   // ---- 我方：羊圈產的村民兵（舊）
   { name: '綿羊兵', team: P, hp: 70, speed: 2.6, radius: 0.3, damage: 6, attackCd: 1.25, reach: 0.12, aggro: 4.5, reward: 0, color: 0xfffaf0, scale: 0.62, model: 'sheep', armor: L },
   // ---- 羊族
@@ -152,7 +156,7 @@ export const UNIT_KINDS: UnitKind[] = [
   { name: '刺球衛', team: P, hp: 125, speed: 1.8, radius: 0.38, damage: 7, attackCd: 1.25, reach: 0.15, aggro: 4, reward: 0, color: 0xfffaf0, scale: 0.75, model: 'sheep', armor: H, meleeDef: 3, rangedDef: 3, skill: { type: 'curl', radius: 2.2, def: 4, reflect: 2, slow: 0.8 }, upgAtk: 1 },
   { name: '豪豬標槍手', team: P, hp: 70, speed: 2.3, radius: 0.3, damage: 8, attackCd: 1.6, reach: 0.1, aggro: 5, reward: 0, color: 0xfffaf0, scale: 0.65, model: 'sheep', armor: L, range: 4, proj: 'javelin', bonusCav: 10 },
   { name: '尖刺弩砲', team: P, hp: 180, speed: 1.2, radius: 0.5, damage: 16, attackCd: 3, reach: 0.1, aggro: 10.5, reward: 0, color: 0xfffaf0, scale: 1.1, model: 'sheep', armor: H, rangedDef: 10, range: 9, proj: 'spike', skill: { type: 'pierce', width: 0.45 }, wheeled: true, upgAtk: 0, bonusSiege: 60 },
-  { name: '陷阱工程師', team: P, hp: 70, speed: 2.2, radius: 0.3, damage: 3, attackCd: 1.2, reach: 0.1, aggro: 7, reward: 0, color: 0xfffaf0, scale: 0.65, model: 'sheep', armor: L, support: true, skill: { type: 'trap', cd: 4, dmg: 15, max: 3 } },
+  { name: '陷阱工程師', team: P, hp: 70, speed: 2.2, radius: 0.3, damage: 0, attackCd: 1.2, reach: 0.1, aggro: 7, reward: 0, color: 0xfffaf0, scale: 0.65, model: 'sheep', armor: L, support: true, villager: true, skill: { type: 'trap', cd: 4, dmg: 15, max: 3 } },
   // ---- 狗族（全部輕甲）
   { name: '狗狗騎兵', team: P, hp: 135, speed: 4.2, radius: 0.32, damage: 11, attackCd: 1.3, reach: 0.15, aggro: 6, reward: 0, color: 0xfffaf0, scale: 0.65, model: 'sheep', armor: L, meleeDef: 0, rangedDef: 2, bonusRanged: 9, cavalry: true },
   { name: '吠叫兵', team: P, hp: 85, speed: 2.8, radius: 0.3, damage: 4, attackCd: 1.6, reach: 0.1, aggro: 5, reward: 0, color: 0xfffaf0, scale: 0.65, model: 'sheep', armor: L, range: 3, skill: { type: 'bark', radius: 3 } },
@@ -207,16 +211,78 @@ export const UNIT_KINDS: UnitKind[] = [
   { name: '骷髏旗手', team: Team.Enemy, hp: 50, speed: 1.7, radius: 0.28, damage: 0, attackCd: 1, reach: 0.1, aggro: 0, reward: 3, color: 0xe0b0a0, scale: 0.66, model: 'monster', armor: L, support: true, skill: { type: 'horn', radius: 4, atk: 2 } },
   { name: '骷髏骨頭車', team: Team.Enemy, hp: 180, speed: 1.0, radius: 0.5, damage: 18, attackCd: 2.5, reach: 0.2, aggro: 3, reward: 6, color: 0xb8a888, scale: 1.05, model: 'monster', armor: H, meleeDef: 2, rangedDef: 6, wheeled: true, bldMul: 3 },
   // 毛球族第三階段：角毛球獸（衝鋒撞擊，打建築有加成）
-  { name: '角毛球獸', team: Team.Enemy, hp: 150, speed: 1.9, radius: 0.42, damage: 14, attackCd: 1.3, reach: 0.15, aggro: 4, reward: 5, color: 0x8aa55a, scale: 0.85, model: 'monster', armor: H, meleeDef: 1, rangedDef: 1, bldMul: 1.5 },
-  // ---- 各族掌旗手：不攻擊，周圍 4 格的隊友攻擊 +2（不疊加，和號角手取最大）
-  { name: '豬人族掌旗手', team: P, hp: 80, speed: 2.3, radius: 0.3, damage: 0, attackCd: 1, reach: 0.1, aggro: 0, reward: 0, color: 0xf4b6c2, scale: 0.68, model: 'sheep', armor: L, meleeDef: 1, rangedDef: 1, support: true, skill: { type: 'horn', radius: 4, atk: 2 } },
-  { name: '牛人族掌旗手', team: P, hp: 80, speed: 2.3, radius: 0.3, damage: 0, attackCd: 1, reach: 0.1, aggro: 0, reward: 0, color: 0xd9b48a, scale: 0.68, model: 'sheep', armor: L, meleeDef: 1, rangedDef: 1, support: true, skill: { type: 'horn', radius: 4, atk: 2 } },
-  { name: '狼人族掌旗手', team: P, hp: 80, speed: 2.3, radius: 0.3, damage: 0, attackCd: 1, reach: 0.1, aggro: 0, reward: 0, color: 0x9a9a9a, scale: 0.68, model: 'sheep', armor: L, meleeDef: 1, rangedDef: 1, support: true, skill: { type: 'horn', radius: 4, atk: 2 } },
-  { name: '蛛人族掌旗手', team: P, hp: 80, speed: 2.3, radius: 0.3, damage: 0, attackCd: 1, reach: 0.1, aggro: 0, reward: 0, color: 0x6b5b7b, scale: 0.68, model: 'sheep', armor: L, meleeDef: 1, rangedDef: 1, support: true, skill: { type: 'horn', radius: 4, atk: 2 } },
-  { name: '魚人族掌旗手', team: P, hp: 80, speed: 2.3, radius: 0.3, damage: 0, attackCd: 1, reach: 0.1, aggro: 0, reward: 0, color: 0x7fb6e0, scale: 0.68, model: 'sheep', armor: L, meleeDef: 1, rangedDef: 1, support: true, skill: { type: 'horn', radius: 4, atk: 2 } },
-  { name: '鹿族掌旗手', team: P, hp: 80, speed: 2.3, radius: 0.3, damage: 0, attackCd: 1, reach: 0.1, aggro: 0, reward: 0, color: 0xc9a27a, scale: 0.68, model: 'sheep', armor: L, meleeDef: 1, rangedDef: 1, support: true, skill: { type: 'horn', radius: 4, atk: 2 } },
-  { name: '樹人族掌旗手', team: P, hp: 80, speed: 2.3, radius: 0.3, damage: 0, attackCd: 1, reach: 0.1, aggro: 0, reward: 0, color: 0x7a9a5a, scale: 0.68, model: 'sheep', armor: L, meleeDef: 1, rangedDef: 1, support: true, skill: { type: 'horn', radius: 4, atk: 2 } },
+  { name: '角毛球獸', team: Team.Enemy, hp: 150, speed: 1.9, radius: 0.42, damage: 14, attackCd: 1.3, reach: 0.15, aggro: 4, reward: 5, color: 0x8aa55a, scale: 0.85, model: 'monster', armor: H, meleeDef: 1, rangedDef: 1, bldMul: 1.5, jumping: true },
 ];
+
+/**
+ * 怪物族：每族四個階段（圖：public/sprites/<id>_1…4/）。規則簡單：
+ * 每族只寫第一階段的數值（size＝體型），階段越高照 MONSTER_TIER 的倍率變大、變耐打、打得更痛；第四階段是重甲。
+ * 都是近戰。還沒加進屍潮（WAVE_MIX），目前只在圖鑑裡。
+ */
+export interface MonsterFamily {
+  id: string;
+  name: string;
+  tiers: [string, string, string, string];
+  hp: number;
+  damage: number;
+  speed: number;
+  /** 體型（1＝和骷髏雜兵差不多） */
+  size: number;
+  color: number;
+  /** 拆建築的傷害倍率（巨人類） */
+  bldMul?: number;
+  /** 和其他族合成同一個種族（MONSTER_TRIBES 的 id）；沒有就自己一族 */
+  tribe?: string;
+  /** 會飛（見 UnitKind.flying） */
+  flying?: boolean;
+}
+export const MONSTERS: MonsterFamily[] = [
+  { id: 'goblin', name: '👺 哥布林', tiers: ['普通哥布林', '野性哥布林', '狂暴哥布林', '魔化哥布林'], hp: 30, damage: 4, speed: 2.0, size: 0.9, color: 0x8aa04a },
+  { id: 'evil_pig', name: '🐗 墮落豬人族', tiers: ['豬人暴徒', '獠牙豬人', '狂暴豬將', '豬魔霸王'], hp: 60, damage: 7, speed: 1.6, size: 1.1, color: 0xd98a8a },
+  { id: 'evil_bull', name: '🐂 壞牛人族', tiers: ['牛人暴徒', '鐵角牛人', '戰牛勇士', '牛魔霸主'], hp: 70, damage: 8, speed: 1.7, size: 1.15, color: 0x8a5a3a },
+  { id: 'evil_treant', name: '🌳 樹人雜兵', tiers: ['樹精小兵', '森林樹兵', '藤甲樹兵', '古樹守衛'], hp: 75, damage: 6, speed: 1.2, size: 1.05, color: 0x7a9a4a, tribe: 'forest' },
+  { id: 'evil_treant2', name: '🌲 壞樹人族', tiers: ['樹靈殘枝', '腐木樹人', '荊棘樹魔', '墮落樹王'], hp: 75, damage: 7, speed: 1.2, size: 1.05, color: 0x6a4a2a, tribe: 'forest' },
+  { id: 'dryad', name: '🥀 壞樹妖族', tiers: ['樹妖幼體', '藤蔓樹妖', '荊棘樹妖', '墮落樹姬'], hp: 40, damage: 5, speed: 1.9, size: 0.95, color: 0x9ab06a, tribe: 'forest' },
+  { id: 'earth_giant', name: '🪨 土巨人族', tiers: ['岩石巨人', '石護巨人', '地脈巨人', '大地巨人'], hp: 110, damage: 10, speed: 1.0, size: 1.25, color: 0x9a8a6a, bldMul: 2 },
+  { id: 'fireling', name: '🔥 火人族', tiers: ['火熔人', '烈炎人', '火焰戰士', '炎獄領主'], hp: 30, damage: 5, speed: 2.2, size: 0.85, color: 0xf07a2a, tribe: 'fire' },
+  { id: 'fire_giant', name: '🌋 火巨人族', tiers: ['火焰巨人', '熔岩巨人', '烈焰巨人', '黑炎巨人'], hp: 110, damage: 11, speed: 1.0, size: 1.25, color: 0xc0502a, bldMul: 2, tribe: 'fire' },
+  { id: 'yeti', name: '❄️ 雪怪族', tiers: ['雪幼怪', '雪毛怪', '冰角雪怪', '霜巔巨雪怪'], hp: 85, damage: 8, speed: 1.5, size: 1.15, color: 0xe8f0f8 },
+  { id: 'slime', name: '🫧 黏黏族', tiers: ['小黏黏', '膠質黏黏', '酸液黏黏', '變異黏王'], hp: 45, damage: 4, speed: 1.3, size: 0.9, color: 0x6ac0e0 },
+  { id: 'bat', name: '🦇 蝙蝠族', tiers: ['小蝙蝠', '血蝠', '魔蝠', '夜幕巨蝠'], hp: 25, damage: 3, speed: 2.8, size: 0.9, color: 0x6a3a5a, tribe: 'vampire', flying: true },
+  { id: 'vampire', name: '🧛 吸血鬼族', tiers: ['初階吸血鬼', '菁英吸血鬼', '貴族吸血鬼', '血族始祖'], hp: 50, damage: 6, speed: 2.0, size: 1.0, color: 0x8a2a3a, tribe: 'vampire' },
+  { id: 'vamp_girl', name: '🌹 吸血鬼族（少女）', tiers: ['吸血少女', '血裔少女', '夢魘少女', '血皇蘿莉'], hp: 45, damage: 6, speed: 2.1, size: 1.0, color: 0xc04a5a, tribe: 'vampire' },
+  { id: 'imp', name: '😈 惡魔', tiers: ['初階惡魔', '強化惡魔', '魔化惡魔', '魔王惡魔'], hp: 35, damage: 5, speed: 2.3, size: 1.0, color: 0x5a2a3a, tribe: 'demon', flying: true },
+  { id: 'imp2', name: '👿 惡魔（第二版）', tiers: ['惡魔 Ⅰ', '惡魔 Ⅱ', '惡魔 Ⅲ', '惡魔 Ⅳ'], hp: 35, damage: 5, speed: 2.3, size: 1.0, color: 0x4a2a3a, tribe: 'demon', flying: true },
+];
+/** 合成一個種族的怪物族（圖鑑、對打測試都當同一族） */
+export const MONSTER_TRIBES: Record<string, string> = {
+  forest: '🌲 墮落森林', // 樹人雜兵、壞樹人族、壞樹妖族
+  fire: '🔥 火焰族', // 火人族、火巨人族
+  vampire: '🦇 吸血鬼族', // 蝙蝠族、吸血鬼族、吸血鬼族（少女）
+  demon: '😈 惡魔族', // 惡魔、惡魔（第二版）
+};
+/** 階段 1→4 的倍率 */
+export const MONSTER_TIER = {
+  hp: [1, 2, 4, 8],
+  damage: [1, 1.6, 2.6, 4.5],
+  size: [0.8, 0.92, 1.05, 1.25],
+  speed: [1, 1, 0.95, 0.85],
+  reward: [1, 2, 5, 15],
+};
+/** MONSTER_KIND[族][階段 0–3]＝兵種編號（接在 UNIT_KINDS 後面） */
+export const MONSTER_KIND: number[][] = MONSTERS.map((m) =>
+  m.tiers.map((name, t) => {
+    const s = m.size * MONSTER_TIER.size[t];
+    UNIT_KINDS.push({
+      name, team: Team.Enemy,
+      hp: Math.round(m.hp * MONSTER_TIER.hp[t]), damage: Math.round(m.damage * MONSTER_TIER.damage[t]),
+      speed: +(m.speed * MONSTER_TIER.speed[t]).toFixed(2), radius: +(0.3 * s).toFixed(2),
+      attackCd: 1.2, reach: 0.15, aggro: 4, reward: MONSTER_TIER.reward[t], color: m.color,
+      scale: +(0.7 * s).toFixed(2), model: 'monster',
+      armor: t === 3 ? H : L, meleeDef: t, rangedDef: t, bldMul: m.bldMul, flying: m.flying,
+    });
+    return UNIT_KINDS.length - 1;
+  }));
 
 export interface BuildingKind {
   name: string;
@@ -284,19 +350,19 @@ export const BUILDING_KINDS: BuildingKind[] = [
   { name: '刺刺族軍營', icon: '🦔', size: 2, hp: 450, cost: 60, color: 0xc9a27a, upgradeCost: [60, 120], sprite: 'barracks_spiky' },
   { name: '狗族軍營', icon: '🐕', size: 2, hp: 400, cost: 60, color: 0xc9a27a, upgradeCost: [60, 120], sprite: 'barracks_dog' },
   { name: '鳥人族軍營', icon: '🦅', size: 2, hp: 400, cost: 60, color: 0xc9a27a, upgradeCost: [60, 120], sprite: 'barracks_bird' },
-  { name: '樹人族軍營', icon: '🌳', size: 2, hp: 450, cost: 60, color: 0xa9d494, upgradeCost: [60, 120], sprite: 'barracks_treant', spawnCap: 3, trains: [UK.TreantShield, UK.TreantJavelin, UK.TreantAxeCart, UK.TreantClub, UK.FlagTreant] },
-  { name: '魚人族軍營', icon: '🐟', size: 2, hp: 400, cost: 60, color: 0x7fb6e0, upgradeCost: [60, 120], sprite: 'barracks_fish', spawnCap: 3, trains: [UK.FishHarpoon, UK.FishSpear, UK.FishCannon, UK.FishAnchor, UK.FlagFish] },
-  { name: '蛛人族軍營', icon: '🕷️', size: 2, hp: 400, cost: 60, color: 0xb59ad9, upgradeCost: [60, 120], sprite: 'barracks_spider', spawnCap: 3, trains: [UK.SpiderDrop, UK.SpiderWeb, UK.SpiderBallista, UK.SpiderFlail, UK.FlagSpider] },
-  { name: '狼人族軍營', icon: '🐺', size: 2, hp: 400, cost: 60, color: 0x9a9a9a, upgradeCost: [60, 120], sprite: 'barracks_wolf', spawnCap: 3, trains: [UK.WolfClaw, UK.WolfSlinger, UK.WolfTrebuchet, UK.WolfBerserker, UK.FlagWolf] },
-  { name: '牛族軍營', icon: '🐂', size: 2, hp: 500, cost: 60, color: 0xc9a27a, upgradeCost: [60, 120], sprite: 'barracks_bull', spawnCap: 3, trains: [UK.BullAxe, UK.BullArcher, UK.BullGreataxe, UK.BullRam, UK.FlagBull] },
-  { name: '豬族軍營', icon: '🐗', size: 2, hp: 450, cost: 60, color: 0xf2a7b5, upgradeCost: [60, 120], sprite: 'barracks_pig', spawnCap: 3, trains: [UK.PigHammer, UK.PigCrossbow, UK.PigGiant, UK.PigCatapult, UK.FlagPig] },
+  { name: '樹人族軍營', icon: '🌳', size: 2, hp: 450, cost: 60, color: 0xa9d494, upgradeCost: [60, 120], sprite: 'barracks_treant', spawnCap: 3, trains: [UK.TreantShield, UK.TreantJavelin, UK.TreantAxeCart, UK.TreantClub] },
+  { name: '魚人族軍營', icon: '🐟', size: 2, hp: 400, cost: 60, color: 0x7fb6e0, upgradeCost: [60, 120], sprite: 'barracks_fish', spawnCap: 3, trains: [UK.FishHarpoon, UK.FishSpear, UK.FishCannon, UK.FishAnchor] },
+  { name: '蛛人族軍營', icon: '🕷️', size: 2, hp: 400, cost: 60, color: 0xb59ad9, upgradeCost: [60, 120], sprite: 'barracks_spider', spawnCap: 3, trains: [UK.SpiderDrop, UK.SpiderWeb, UK.SpiderBallista, UK.SpiderFlail] },
+  { name: '狼人族軍營', icon: '🐺', size: 2, hp: 400, cost: 60, color: 0x9a9a9a, upgradeCost: [60, 120], sprite: 'barracks_wolf', spawnCap: 3, trains: [UK.WolfClaw, UK.WolfSlinger, UK.WolfTrebuchet, UK.WolfBerserker] },
+  { name: '牛族軍營', icon: '🐂', size: 2, hp: 500, cost: 60, color: 0xc9a27a, upgradeCost: [60, 120], sprite: 'barracks_bull', spawnCap: 3, trains: [UK.BullAxe, UK.BullArcher, UK.BullGreataxe, UK.BullRam] },
+  { name: '豬族軍營', icon: '🐗', size: 2, hp: 450, cost: 60, color: 0xf2a7b5, upgradeCost: [60, 120], sprite: 'barracks_pig', spawnCap: 3, trains: [UK.PigHammer, UK.PigCrossbow, UK.PigGiant, UK.PigCatapult] },
   // 高塔 3x3：塔頂 2x2 之後可以放單位（站上去射得更遠）
   { name: '高塔', icon: '🗼', size: 3, hp: 900, cost: 120, color: 0xd9d4c4, upgradeCost: [120, 240], sprite: 'stone_tower' },
   // 城門 1×3：中間 2 格寬的通道，我方靠近自動開門通過；敵人過不去，要拆門（放置時按 R 轉向）
   { name: '城門', icon: '🚪', size: 3, w: 3, h: 1, hp: 600, cost: 30, color: 0xd9d4c4, upgradeCost: [40, 80], sprite: 'gate' },
   { name: '風車', icon: '🌬️', size: 2, hp: 300, cost: 50, color: 0xc9a27a, upgradeCost: [50, 100], sprite: 'windmill' },
   { name: '工程工坊', icon: '🛠️', size: 2, hp: 400, cost: 70, color: 0xc9a27a, upgradeCost: [70, 140], sprite: 'workshop' },
-  { name: '鹿族軍營', icon: '🦌', size: 2, hp: 400, cost: 60, color: 0xa9d494, upgradeCost: [60, 120], sprite: 'barracks_deer', spawnCap: 3, trains: [UK.DeerSaber, UK.DeerLongbow, UK.DeerRam, UK.DeerDruid, UK.FlagDeer] },
+  { name: '鹿族軍營', icon: '🦌', size: 2, hp: 400, cost: 60, color: 0xa9d494, upgradeCost: [60, 120], sprite: 'barracks_deer', spawnCap: 3, trains: [UK.DeerSaber, UK.DeerLongbow, UK.DeerRam, UK.DeerDruid] },
   // 哨塔 1x1：小型瞭望台（功能之後再定，例如看得比較遠）
   { name: '哨塔', icon: '🗼', size: 1, hp: 150, cost: 20, color: 0xc9a27a, upgradeCost: [25, 50], sprite: 'archer_tower' },
 ];
@@ -332,19 +398,25 @@ export const TRIBES: { id: string; name: string; kinds: number[] }[] = [
   { id: 'sheep', name: '🐑 羊族', kinds: [UK.Lancer, UK.Archer, UK.Catapult, UK.Horn] },
   { id: 'spiky', name: '🦔 刺刺族', kinds: [UK.Spineball, UK.Javelin, UK.Ballista, UK.Trapper] },
   { id: 'dog', name: '🐕 狗族', kinds: [UK.DogCav, UK.Barker, UK.StBernard] },
-  { id: 'pig', name: '🐗 豬人族', kinds: [UK.PigHammer, UK.PigCrossbow, UK.PigGiant, UK.PigCatapult, UK.FlagPig] },
-  { id: 'bull', name: '🐂 牛人族', kinds: [UK.BullAxe, UK.BullArcher, UK.BullGreataxe, UK.BullRam, UK.FlagBull] },
-  { id: 'deer', name: '🦌 鹿族', kinds: [UK.DeerSaber, UK.DeerLongbow, UK.DeerRam, UK.DeerDruid, UK.FlagDeer] },
-  { id: 'wolf', name: '🐺 狼人族', kinds: [UK.WolfClaw, UK.WolfSlinger, UK.WolfTrebuchet, UK.WolfBerserker, UK.FlagWolf] },
-  { id: 'fish', name: '🐟 魚人族', kinds: [UK.FishHarpoon, UK.FishSpear, UK.FishCannon, UK.FishAnchor, UK.FlagFish] },
-  { id: 'spider', name: '🕷️ 蛛人族', kinds: [UK.SpiderDrop, UK.SpiderWeb, UK.SpiderBallista, UK.SpiderFlail, UK.FlagSpider] },
-  { id: 'treant', name: '🌳 樹人族', kinds: [UK.TreantShield, UK.TreantJavelin, UK.TreantAxeCart, UK.TreantClub, UK.FlagTreant] },
+  { id: 'pig', name: '🐗 豬人族', kinds: [UK.PigHammer, UK.PigCrossbow, UK.PigGiant, UK.PigCatapult] },
+  { id: 'bull', name: '🐂 牛人族', kinds: [UK.BullAxe, UK.BullArcher, UK.BullGreataxe, UK.BullRam] },
+  { id: 'deer', name: '🦌 鹿族', kinds: [UK.DeerSaber, UK.DeerLongbow, UK.DeerRam, UK.DeerDruid] },
+  { id: 'wolf', name: '🐺 狼人族', kinds: [UK.WolfClaw, UK.WolfSlinger, UK.WolfTrebuchet, UK.WolfBerserker] },
+  { id: 'fish', name: '🐟 魚人族', kinds: [UK.FishHarpoon, UK.FishSpear, UK.FishCannon, UK.FishAnchor] },
+  { id: 'spider', name: '🕷️ 蛛人族', kinds: [UK.SpiderDrop, UK.SpiderWeb, UK.SpiderBallista, UK.SpiderFlail] },
+  { id: 'treant', name: '🌳 樹人族', kinds: [UK.TreantShield, UK.TreantJavelin, UK.TreantAxeCart, UK.TreantClub] },
 ];
 
 /** 敵人的種族（屍潮裡出現；圖鑑最下面一排、對打測試的 enemy 模式用） */
 export const ENEMY_TRIBES: { id: string; name: string; kinds: number[] }[] = [
   { id: 'bone', name: '💀 骨頭族', kinds: [UK.BoneGrunt, UK.BoneSword, UK.BoneBow, UK.BoneFlag, UK.BoneCart] },
   { id: 'fuzz', name: '🌱 毛球族', kinds: [UK.Fuzz, UK.Runner, UK.HornFuzz, UK.Brute] },
+  // 怪物族：有 tribe 的合成一族（放在那一族第一次出現的位置）
+  ...MONSTERS.flatMap((m, f) => {
+    if (!m.tribe) return [{ id: m.id, name: m.name, kinds: MONSTER_KIND[f] }];
+    if (MONSTERS.findIndex((o) => o.tribe === m.tribe) !== f) return [];
+    return [{ id: m.tribe, name: MONSTER_TRIBES[m.tribe], kinds: MONSTERS.flatMap((o, g) => (o.tribe === m.tribe ? MONSTER_KIND[g] : [])) }];
+  }),
 ];
 
 /**

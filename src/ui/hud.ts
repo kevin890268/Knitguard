@@ -1,6 +1,7 @@
 import { Armor, BK, BUILDING_KINDS, Team, UK, UNIT_KINDS, type UnitKind } from '../sim/data';
 import { FORMATIONS, Ord } from '../sim/orders';
 import type { Building, World } from '../sim/world';
+import { RES_ICONS, RES_NAMES, RES_YIELD } from '../sim/map';
 import type { ArmyControl } from './army';
 
 /** 指令卡上的一個按鈕 */
@@ -22,6 +23,9 @@ export interface HudDeps {
   army: ArmyControl;
   getBuilding: () => Building | null;
   setBuilding: (b: Building | null) => void;
+  /** 選到的資源聚落（map.deposits 的索引；−1＝沒有） */
+  getDeposit: () => number;
+  setDeposit: (d: number) => void;
   /** 沒選東西時的指令卡（建造工具） */
   buildCmds: () => CardCmd[];
   /** 選到建築時的指令卡 */
@@ -90,6 +94,8 @@ export class Hud {
     const army = this.d.army, b = this.d.getBuilding();
     const enemy = army.inspected();
     this.updateGroups();
+    if (army.sel.length || enemy >= 0 || (b && !b.dead)) this.d.setDeposit(-1); // 選了別的東西 → 資源聚落取消
+    const dep = this.d.getDeposit();
     if (army.sel.length) {
       this.unitInfo(army.sel, false);
       this.selectionGrid();
@@ -103,6 +109,10 @@ export class Hud {
       this.buildingInfo(b);
       this.buildingWork(b);
       this.card(`b${b.id}:${b.level}:${b.job ? 1 : 0}`, () => this.d.buildingCmds(b));
+    } else if (dep >= 0) {
+      this.depositInfo(dep);
+      this.clearGrid('資源聚落');
+      this.card(`dep${dep}`, () => []);
     } else {
       this.info.innerHTML = '<div class="empty">左鍵點選或框選部隊<br>點建築查看資訊</div>';
       this.clearGrid('');
@@ -127,8 +137,8 @@ export class Hud {
     const ranged = (k.range ?? 0) > 0;
     const bonus = [k.bonusLight ? `對輕甲 +${k.bonusLight}` : '', k.bonusHeavy ? `對重甲 +${k.bonusHeavy}` : '', k.bonusLarge ? `對大型 +${k.bonusLarge}` : ''].filter(Boolean).join('、');
     const stats = [
-      k.support ? '<span>⚔️ 不攻擊（輔助）</span>' : `<span title="傷害／攻擊間隔">⚔️ ${dmg.toFixed(0)}${buff} <small>/${k.attackCd}s</small></span>`,
-      `<span>${ranged ? `🏹 射程 ${k.range}` : '🗡️ 近戰'}</span>`,
+      k.villager ? '<span>🛠️ 村民（不攻擊）</span>' : k.support ? '<span>⚔️ 不攻擊（輔助）</span>' : `<span title="傷害／攻擊間隔">⚔️ ${dmg.toFixed(0)}${buff} <small>/${k.attackCd}s</small></span>`,
+      k.villager ? '' : `<span>${ranged ? `🏹 射程 ${k.range}` : '🗡️ 近戰'}</span>`,
       `<span title="近戰防禦／遠程防禦">🛡️ ${k.meleeDef ?? 0} / ${k.rangedDef ?? 0}</span>`,
       `<span>${(k.armor ?? Armor.Light) === Armor.Heavy ? '⛓️ 重甲' : '🧶 輕甲'}</span>`,
       `<span>👟 ${k.speed}</span>`,
@@ -167,6 +177,19 @@ export class Hud {
       (k.sturdy ? '<div class="skill">🌳 樹人：血厚，但移動、攻擊都慢</div>' : '') +
       (k.slowHit ? `<div class="skill">🕸️ 緩速：打中的敵人移動、攻擊變慢，持續 ${k.slowHit} 秒</div>` : '') +
       `<div class="status">${status}</div></div>`;
+  }
+
+  /** 左：資源聚落（礦、果樹）：種類、大小、剩下多少、採到什麼 */
+  private depositInfo(id: number): void {
+    const d = this.world.map.deposits[id];
+    if (!d) return;
+    const r = d.amount / d.max;
+    this.info.innerHTML =
+      `<div class="pf"><div class="face emoji">${RES_ICONS[d.kind]}</div></div>` +
+      `<div class="body"><div class="name">${RES_NAMES[d.kind]}聚落</div>` +
+      `<div class="hpbar"><i style="width:${(r * 100).toFixed(1)}%;background:#e8b84a"></i><span>${d.amount} / ${d.max}</span></div>` +
+      `<div class="stats"><span>📐 ${d.tiles.length} 格</span><span>⛏️ 採到：${RES_YIELD[d.kind]}</span></div>` +
+      `<div class="skill">可以採集（採集功能之後做）</div></div>`;
   }
 
   /** 左：建築狀態（圖、名稱等級、耐久、佔地、功能數值、目前狀態） */

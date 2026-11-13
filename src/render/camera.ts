@@ -9,7 +9,7 @@ export class RtsCamera {
   dist = 42;
   yaw = Math.PI * 0.25;
   pitch = 0.95;
-  bounds = { w: 96, h: 96 };
+  bounds = { w: 256, h: 256 };
 
   /** WASD 能不能移動鏡頭（main.ts 設成「沒選部隊時」） */
   allowWasd: () => boolean = () => true;

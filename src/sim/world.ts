@@ -1,9 +1,9 @@
 import { Rng } from '../core/rng';
-import { GameMap, Tile } from './map';
+import { GameMap, Tile, type MapLayout } from './map';
 import { Units } from './units';
 import { SpatialHash } from './spatialHash';
 import { FlowField } from './flowfield';
-import { RESEARCH_COST, RESEARCH_MAX, RESEARCH_TIME, WAVE_MIX, type ResearchLine } from './data';
+import { ENEMY_TRIBES, RESEARCH_COST, RESEARCH_MAX, RESEARCH_TIME, WAVE_MIX, type ResearchLine } from './data';
 import { Armor, ASSIST, BK, BUILDING_KINDS, ECON, MAX_LEVEL, PLAYER_SIGHT, PROJ, SLOW, SQUAD, Team, UK, UNIT_KINDS, type ProjKind } from './data';
 import { formationSlots, Ord, type CommandType, type Formation, type QueuedOrder } from './orders';
 
@@ -11,6 +11,8 @@ import { formationSlots, Ord, type CommandType, type Formation, type QueuedOrder
 interface UnitPath { field: FlowField; goals: number[]; }
 const MAX_PATHS = 48;
 const MAX_GROUPS = 4096;
+/** 每種兵在哪一層（碰撞用；0 地面、1 會飛、2 會跳）：不同層不互推（UNIT_KINDS 在 data.ts 載入時就已經包含怪物族） */
+const LAYER = new Uint8Array(UNIT_KINDS.map((k) => (k.flying ? 1 : k.jumping ? 2 : 0)));
 
 export interface Building {
   id: number;
@@ -113,6 +115,15 @@ export class World {
   waveSizes: number[] | null = null;
   /** 屍潮的組成：[兵種, 比例]（預設見 data.ts 的 WAVE_MIX） */
   waveMix: [number, number][] = WAVE_MIX;
+  /**
+   * 每一波只來一個族群（ENEMY_TRIBES 隨機抽一族），由這族的 3–5 種兵組成：一定有最弱的那種（雜兵），
+   * 越弱的越多、越強的越少；最強的 1–2 種是「大型」，照到達節奏在中後段才出現。關掉就用 waveMix。
+   */
+  tribeWaves = true;
+  /** 這一波是哪個族群（畫面顯示用；不是族群波次時是空字串） */
+  waveTribe = '';
+  /** 這一波的「大型」兵種（到達節奏用） */
+  private waveBig = new Set<number>();
   spawnPoints: number[] = [];
 
   private costs: Float32Array;
@@ -127,7 +138,13 @@ export class World {
   private readonly engX = new Float32Array(MAX_GROUPS);
   private readonly engY = new Float32Array(MAX_GROUPS);
   private readonly engTick = new Int32Array(MAX_GROUPS).fill(-100);
-  private spawnQueue: number[] = []; // kind, x, y 三個一組
+  /** 等著出生的敵人：kind, x, y, 行軍速度, 出生時間 五個一組（依出生時間排好） */
+  private spawnQueue: number[] = [];
+  /**
+   * 一波敵人分散在這麼多秒內出生，到達的節奏：先只有雜兵 → 開始有大型 → 大型越來越多 → 最後零零星星收尾。
+   * 大家用同一個行軍速度，所以出生順序≈到達順序。
+   */
+  waveSpread = 80;
   private nextBid = 1;
   private tmp = new Int32Array(4096);
   /** 給 hit() 裡面查周圍用（hit 常在用 tmp 的迴圈裡被呼叫，不能共用） */
@@ -135,9 +152,10 @@ export class World {
   private steerOut: [number, number] = [0, 0];
   private rng: Rng;
 
-  constructor(readonly seed: number, size = 96) {
+  /** 地圖預設 256×256 */
+  constructor(readonly seed: number, size = 256, layout: MapLayout = 'south') {
     this.rng = new Rng(seed ^ 0x9e3779b9);
-    this.map = new GameMap(size, size, seed);
+    this.map = new GameMap(size, size, seed, layout);
     this.hash = new SpatialHash(size, size, 1.25, MAX_UNITS);
     this.flow = new FlowField(size, size);
     this.occ = new Int32Array(size * size).fill(-1);
@@ -149,8 +167,14 @@ export class World {
     this.recomputeFlow();
     const { w, h } = this.map;
     const edge: number[] = [];
-    for (let x = 0; x < w; x++) edge.push(x, (h - 1) * w + x);
-    for (let y = 1; y < h - 1; y++) edge.push(y * w, y * w + w - 1);
+    // south：只從上方兩條邊（畫面上的左、上、右）來；center：四邊都會來
+    if (layout === 'south') {
+      for (let x = 0; x < w; x++) edge.push(x);
+      for (let y = 1; y < h; y++) edge.push(y * w);
+    } else {
+      for (let x = 0; x < w; x++) edge.push(x, (h - 1) * w + x);
+      for (let y = 1; y < h - 1; y++) edge.push(y * w, y * w + w - 1);
+    }
     this.spawnPoints = edge.filter((i) => this.flow.dist[i] < Infinity);
     if (this.spawnPoints.length < 8) {
       // 有些地圖的邊緣全被石頭或水擋住，走不到城堡 → 改用走得到、而且離城堡最遠的格子
@@ -201,8 +225,24 @@ export class World {
     this.wave++;
     this.waveTimer = this.waveInterval;
     const w = this.wave;
+    if (this.tribeWaves) this.pickTribeMix();
     const custom = this.waveSizes?.[w - 1];
     this.spawnHorde(custom ?? Math.round(12 + w * 8 + w * w * 1.5), custom !== undefined);
+  }
+
+  /** 抽這一波的族群和 3–5 種兵，設定 waveMix（比例：越弱越多）和 waveBig（最強的 1–2 種） */
+  private pickTribeMix(): void {
+    const tribe = ENEMY_TRIBES[this.rng.int(0, ENEMY_TRIBES.length - 1)];
+    const byHp = [...tribe.kinds].sort((a, b) => UNIT_KINDS[a].hp - UNIT_KINDS[b].hp);
+    const n = Math.min(byHp.length, this.rng.int(3, 5));
+    const pick = [byHp[0]]; // 最弱的一定有（雜兵）
+    const rest = byHp.slice(1);
+    while (pick.length < n && rest.length) pick.push(rest.splice(this.rng.int(0, rest.length - 1), 1)[0]);
+    pick.sort((a, b) => UNIT_KINDS[a].hp - UNIT_KINDS[b].hp);
+    const share = [0.45, 0.27, 0.15, 0.09, 0.04]; // 由弱到強
+    this.waveMix = pick.map((k, i) => [k, share[i]]);
+    this.waveBig = new Set(pick.slice(n >= 4 ? -2 : -1));
+    this.waveTribe = tribe.name;
   }
 
   spawnHorde(count: number, useMix = false): void {
@@ -211,19 +251,40 @@ export class World {
     const nc = 1 + Math.min(3, Math.floor(this.wave / 3));
     for (let c = 0; c < nc; c++) clusters.push(this.spawnPoints[this.rng.int(0, this.spawnPoints.length - 1)]);
     const w = this.map.w;
+    // 先抽好每一隻的兵種；同一群（同一個出生點）的地面敵人用這群的平均速度一起行軍：
+    // 大型的不會脫隊、快的也不會衝太前面（會飛、會跳的照自己的速度）
+    const total = this.waveMix.reduce((s, [, p]) => s + p, 0);
+    const kinds: number[] = [];
     for (let n = 0; n < count; n++) {
+      let r = this.rng.next() * total, kind = this.waveMix[0][0];
+      for (const [k, p] of this.waveMix) { if (r < p) { kind = k; break; } r -= p; }
+      kinds.push(kind);
+    }
+    const march = clusters.map((_, c) => {
+      let s = 0, n = 0;
+      for (let i = c; i < count; i += clusters.length) { const k = UNIT_KINDS[kinds[i]]; if (!k.flying && !k.jumping) { s += k.speed; n++; } }
+      return n ? s / n : 0;
+    });
+    void useMix;
+    // 出生時間（0–1，乘上 waveSpread）：雜兵前面多、越後面越少；大型 20% 才開始出現、越後面越多；
+    // 最後約 8% 的敵人（不分大小）放到 85%–100% 之間，零零星星收尾
+    const D = this.waveSpread, entries: number[][] = [];
+    const big = (k: number) => (this.waveBig.size ? this.waveBig.has(k) : UNIT_KINDS[k].radius >= 0.4);
+    for (let n = 0; n < count; n++) {
+      const r = this.rng.next();
+      let at = big(kinds[n]) ? 0.2 + 0.65 * Math.sqrt(r) : 0.85 * Math.pow(r, 1.4);
+      if (this.rng.next() < 0.08) at = 0.85 + 0.15 * Math.sqrt(this.rng.next());
+      entries.push([n, this.time + at * D]);
+    }
+    entries.sort((a, b) => a[1] - b[1]);
+    for (const [n, at] of entries) {
       const sp = clusters[n % clusters.length];
       let x = (sp % w) + 0.5 + this.rng.range(-2, 2);
       let y = Math.floor(sp / w) + 0.5 + this.rng.range(-2, 2);
       // 隨機偏移後要確認還走得到城堡：偏移可能把敵人丟進被石頭圍住的封閉小區域，那裡流場沒有方向，敵人會卡住
       const ti = Math.floor(y) * w + Math.floor(x);
       if (this.isSolid(Math.floor(x), Math.floor(y)) || !(this.flow.dist[ti] < Infinity)) { x = (sp % w) + 0.5; y = Math.floor(sp / w) + 0.5; }
-      // 照比例抽兵種（useMix 保留參數：現在一律用 waveMix）
-      void useMix;
-      const total = this.waveMix.reduce((s, [, p]) => s + p, 0);
-      let r = this.rng.next() * total, kind = this.waveMix[0][0];
-      for (const [k, p] of this.waveMix) { if (r < p) { kind = k; break; } r -= p; }
-      this.spawnQueue.push(kind, x, y);
+      this.spawnQueue.push(kinds[n], x, y, march[n % clusters.length], at);
     }
   }
 
@@ -233,13 +294,17 @@ export class World {
 
   private processSpawns(): void {
     const q = this.spawnQueue;
-    const n = Math.min(q.length / 3, 60);
-    for (let k = 0; k < n; k++) this.units.spawn(q[k * 3], q[k * 3 + 1], q[k * 3 + 2]);
-    q.splice(0, n * 3);
+    let n = 0; // 時間到了的才出生（一 tick 最多 60 隻）
+    while (n < 60 && n * 5 < q.length && q[n * 5 + 4] <= this.time) n++;
+    for (let k = 0; k < n; k++) {
+      const i = this.units.spawn(q[k * 5], q[k * 5 + 1], q[k * 5 + 2]);
+      if (i >= 0) this.units.spdCap[i] = q[k * 5 + 3]; // 敵人借 spdCap 存群組行軍速度
+    }
+    q.splice(0, n * 5);
   }
 
   get pendingSpawns(): number {
-    return this.spawnQueue.length / 3;
+    return this.spawnQueue.length / 5;
   }
 
   // ---------------------------------------------------------------- 建築
@@ -1239,6 +1304,8 @@ export class World {
         const tx = Math.min(w - 1, Math.max(0, Math.floor(x)));
         const ty = Math.min(h - 1, Math.max(0, Math.floor(y)));
         let fx = flow.dirX[ty * w + tx], fy = flow.dirY[ty * w + tx];
+        // 平滑：用周圍 4 格的方向依距離混合（不然每過一格方向就突然轉 45°，走起來一扭一扭）
+        if (this.moveTuning.smoothFlow && (fx !== 0 || fy !== 0)) { this.smoothFlow(x, y, fx, fy); fx = this.flowOut[0]; fy = this.flowOut[1]; }
         if (fx !== 0 || fy !== 0) {
           u.skillT[i] = 0;
           // 卡在窄縫：大隻的（例如大毛怪）擠不過只有一格寬的縫，流場又一直指向那裡。
@@ -1285,7 +1352,7 @@ export class World {
             }
           } else { dx = fx; dy = fy; }
         } else { dx = fx; dy = fy; }
-      } else if (k.support && this.squadFight(i) >= 0) {
+      } else if (k.support && !k.villager && this.squadFight(i) >= 0) {
         // 輔助兵（號角手、救援犬）：小隊在打就跟過去，站在戰鬥點後面一點
         u.bestD[i] = Infinity; // 打完再重新判斷有沒有在前進
         const g = u.grp[i], ex = this.engX[g] - x, ey = this.engY[g] - y, d = Math.hypot(ex, ey);
@@ -1314,6 +1381,8 @@ export class World {
       if (this.raging(i)) speed *= 1 + (k.skill as { moveSpeed: number }).moveSpeed;
       // 陣型一起走時配合最慢的單位；快到了才各自加速就位
       if (u.spdCap[i] > 0 && ord !== Ord.Idle && t < 0 && Math.hypot(u.ordX[i] - x, u.ordY[i] - y) > 2.5) speed = Math.min(speed, u.spdCap[i]);
+      // 敵人：地面的跟著群組行軍速度走（會飛、會跳的照自己的）
+      if (u.team[i] === Team.Enemy && u.spdCap[i] > 0 && !k.flying && !k.jumping) speed = u.spdCap[i];
       if (slowed) speed *= 1 - SLOW.move;
       if (u.curled[i] && k.skill?.type === 'curl') speed *= 1 - k.skill.slow;
       u.vx[i] += (dx * speed - u.vx[i]) * blend;
@@ -1381,6 +1450,30 @@ export class World {
     }
   }
 
+  /**
+   * 流場方向的雙線性內插：以格子中心為取樣點，混合周圍 4 格（走不到城堡的格子不算）。
+   * 結果放在 flowOut（單位向量）；fx/fy 是目前這格的方向，混出來是 0 時用它。
+   */
+  private readonly flowOut: [number, number] = [0, 0];
+  /** 走路平滑的開關（測試用；smoothFlow＝流場方向內插、push＝每 tick 推開重疊的比例） */
+  moveTuning = { smoothFlow: true, push: 0.4 };
+  private smoothFlow(x: number, y: number, fx: number, fy: number): void {
+    const flow = this.flow, w = this.map.w, h = this.map.h;
+    const gx = x - 0.5, gy = y - 0.5, ix = Math.floor(gx), iy = Math.floor(gy), ax = gx - ix, ay = gy - iy;
+    let sx = 0, sy = 0;
+    for (let k = 0; k < 4; k++) {
+      const cx = ix + (k & 1), cy = iy + (k >> 1);
+      if (cx < 0 || cy < 0 || cx >= w || cy >= h) continue;
+      const j = cy * w + cx;
+      if (!(flow.dist[j] < Infinity)) continue;
+      const wt = ((k & 1) ? ax : 1 - ax) * ((k >> 1) ? ay : 1 - ay);
+      sx += flow.dirX[j] * wt; sy += flow.dirY[j] * wt;
+    }
+    const len = Math.hypot(sx, sy);
+    if (len < 1e-3) { this.flowOut[0] = fx; this.flowOut[1] = fy; return; }
+    this.flowOut[0] = sx / len; this.flowOut[1] = sy / len;
+  }
+
   // ---------------------------------------------------------------- 碰撞
   private resolveCollisions(): void {
     const u = this.units, hs = this.hash, cols = hs.cols, rows = hs.rows;
@@ -1396,13 +1489,15 @@ export class World {
           for (let p = hs.cellStart[cell], e = hs.cellStart[cell + 1]; p < e; p++) {
             const j = hs.items[p];
             if (j <= i || !u.alive[j]) continue;
+            if (LAYER[u.kind[i]] !== LAYER[u.kind[j]]) continue; // 會飛、會跳的從地面單位上面越過，不互推
             let dx = u.x[j] - u.x[i], dy = u.y[j] - u.y[i];
             const rj = u.rad[j], min = ri + rj;
             let d2 = dx * dx + dy * dy;
             if (d2 >= min * min) continue;
             if (d2 < 1e-8) { dx = Math.random() - 0.5; dy = Math.random() - 0.5; d2 = dx * dx + dy * dy; }
             const d = Math.sqrt(d2);
-            const push = (min - d) * 0.8;
+            // 每 tick 只推開重疊的 40%（推太滿會在人群裡來回彈，看起來一直抖；0.8 時人群抖動約 4 倍）
+            const push = (min - d) * this.moveTuning.push;
             const nx = dx / d, ny = dy / d;
             const mj = rj * rj, wi = mj / (mi + mj); // 大隻的比較推不動
             u.x[i] -= nx * push * wi; u.y[i] -= ny * push * wi;
