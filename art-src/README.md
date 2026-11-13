@@ -40,11 +40,11 @@
 | 建築 | 資料夾 | 設定圖 | 遊戲圖 |
 |---|---|---|---|
 | 🌳 世界樹市鎮中心 | `buildings/town-center/` | ✅ 五個階段（`stage1`…`stage5`；被換掉的舊版在 `old/`） | `public/sprites/buildings/town_center_1…5.png` |
-| 📦 倉庫 | `buildings/warehouse/` | ✅ | 還沒做 |
-| 🏠 房屋 | `buildings/house/` | ✅ | 還沒做 |
-| 🌾 穀倉 | `buildings/granary/` | ✅ | 還沒做 |
-| ⚒️ 兵工廠 | `buildings/arsenal/` | ✅ 三個階段 | 還沒做 |
-| 🚜 農場 | `buildings/farm/` | ✅ 三個階段 | 還沒做 |
-| 🔮 魔法研究院 | `buildings/research/` | ✅ 三個階段 | 還沒做 |
+| 📦 倉庫 | `buildings/warehouse/` | ✅ 三個階段 | `public/sprites/buildings/warehouse_1…3.png`（還沒放進遊戲） |
+| 🏠 房屋 | `buildings/house/` | ✅ 三個階段 | `public/sprites/buildings/house_1…3.png`（還沒放進遊戲） |
+| 🌾 穀倉 | `buildings/granary/` | ✅ 三個階段 | `public/sprites/buildings/granary_1…3.png`（還沒放進遊戲） |
+| ⚒️ 兵工廠 | `buildings/arsenal/` | ✅ 三個階段 | `public/sprites/buildings/arsenal_1…3.png`（還沒放進遊戲） |
+| 🚜 農場 | `buildings/farm/` | ✅ 三個階段 | `public/sprites/buildings/farm_1…3.png`（還沒放進遊戲） |
+| 🔮 魔法研究院 | `buildings/research/` | ✅ 三個階段 | `public/sprites/buildings/research_1…3.png`（還沒放進遊戲） |
 
 建築只用設定圖上的「45° 俯視（主視角）」一張：`tools/cutout-building.ps1` 裁下來並去背成透明 PNG（背景是模糊的漸層光暈，用「顏色平滑延伸」判斷背景）。
