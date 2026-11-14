@@ -9,7 +9,7 @@ import { DIR_VIEWS, VIEW_FILES, type ViewName } from './render2d/sprites2d';
  * 只讀圖片，不跑遊戲。
  */
 
-interface Char { id: string; name: string; tier?: string }
+interface Char { id: string; name: string; tier?: string; /** 怪物族：屬於哪個小族（換族就換一排） */ fam?: number }
 interface Group { title: string; note?: string; kind: 'player' | 'enemy' | 'new'; chars: Char[] }
 
 const ROMAN = ['Ⅰ', 'Ⅱ', 'Ⅲ', 'Ⅳ'];
@@ -27,17 +27,18 @@ const fromTribes = (tribes: typeof TRIBES, kind: 'player' | 'enemy'): Group[] =>
   }));
 /** 怪物族（單獨一族，或幾族合成的種族，例如墮落森林） */
 const isMonster = (id: string) => MONSTERS.some((m) => m.id === id) || id in MONSTER_TRIBES;
-/** 兵種編號 → 第幾階段（0–3） */
-const tierOf = (kind: number) => { for (const tiers of MONSTER_KIND) { const t = tiers.indexOf(kind); if (t >= 0) return t; } return -1; };
+/** 兵種編號 → [第幾個小族, 第幾階段] */
+const famTier = (kind: number): [number, number] => { for (let f = 0; f < MONSTER_KIND.length; f++) { const t = MONSTER_KIND[f].indexOf(kind); if (t >= 0) return [f, t]; } return [-1, -1]; };
 const GROUPS: Group[] = [
   ...fromTribes(TRIBES, 'player'),
   ...fromTribes(ENEMY_TRIBES.filter((t) => !isMonster(t.id)), 'enemy'),
-  // 怪物族：每族四階段 Ⅰ→Ⅳ（數值在 data.ts 的 MONSTERS）；合成的種族裡每族一排四張
+  // 怪物族：每族三或四階段（數值在 data.ts 的 MONSTERS）；合成的種族裡每個小族一排
   ...ENEMY_TRIBES.filter((t) => isMonster(t.id)).map((t): Group => {
-    const fams = t.kinds.length / 4;
+    const fams = new Set(t.kinds.map((k) => famTier(k)[0]));
+    const tierCounts = [...new Set([...fams].map((f) => MONSTERS[f].tiers.length))].sort().join('、');
     return {
-      title: t.name, note: fams > 1 ? `${fams} 族合成・各四階段 Ⅰ→Ⅳ` : '四階段 Ⅰ→Ⅳ', kind: 'new',
-      chars: t.kinds.map((k) => ({ id: slotOf(k)!.id, name: slotOf(k)!.label, tier: ROMAN[tierOf(k)] })),
+      title: t.name, note: (fams.size > 1 ? `${fams.size} 族合成・` : '') + `${tierCounts} 階段`, kind: 'new',
+      chars: t.kinds.map((k) => { const [f, tier] = famTier(k); return { id: slotOf(k)!.id, name: slotOf(k)!.label.replace(/ [ⅠⅡⅢⅣ]$/, ''), tier: ROMAN[tier], fam: f }; /* 名稱後面的 Ⅰ／Ⅱ／Ⅲ 已經在上面標了 */ }),
     };
   }),
 ];
@@ -109,9 +110,11 @@ for (const grp of GROUPS) {
   sec.className = grp.kind === 'player' ? 'player' : 'enemy';
   sec.dataset.kind = grp.kind;
   sec.innerHTML = `<h2>${grp.title}<small>${grp.note ?? grp.chars.length + ' 種'}</small></h2>`;
-  const grid = document.createElement('div');
-  grid.className = grp.kind === 'new' ? 'grid grid4' : 'grid'; // 怪物族：一排 4 張＝一族的 Ⅰ→Ⅳ
+  let grid = document.createElement('div');
+  grid.className = grp.kind === 'new' ? 'grid grid4' : 'grid'; // 怪物族：一排＝一個小族的 Ⅰ→Ⅳ（或 Ⅰ→Ⅲ）
+  let fam = grp.chars[0]?.fam;
   for (const ch of grp.chars) {
+    if (ch.fam !== fam) { sec.appendChild(grid); grid = document.createElement('div'); grid.className = 'grid grid4'; fam = ch.fam; } // 換小族：換一排
     const card = document.createElement('div');
     card.className = 'card';
     const cv = document.createElement('canvas');

@@ -9,7 +9,7 @@ param([string]$Root, [string]$Only = '', [switch]$NoSprites)
 # Column map: one entry per column, '' = not used (top-down view etc).
 $STD = ',front,frontLeft45,sideLeft,back,back45,side,front45'   # 俯角45 正面 右前 右側 背面 左後 左側 左前
 $jobs = @(
-  # folder, sprite id, cols per row, LabelX, HeaderY, flood(1/0), column map, [ClipX, ClipY: hard-clear everything left of / above], [Erase: 'x,y,w,h;...' rectangles to clear, e.g. title labels]
+  # folder, sprite id, cols per row, LabelX, HeaderY, flood(1/0), column map, [ClipX, ClipY: hard-clear everything left of / above], [Erase: 'x,y,w,h;...' rectangles to clear, e.g. title labels], [rows = tiers, default 4]
   @('goblin','goblin',8,215,70,0,$STD),
   @('vampire-girl','vamp_girl',8,215,70,0,$STD),
   @('bat','bat',8,215,115,0,$STD),
@@ -115,10 +115,11 @@ foreach ($j in $jobs) {
   $views = Join-Path $dir 'views'; New-Item -ItemType Directory -Force $views | Out-Null
   Get-ChildItem $views -Filter 'v_*.png' -ErrorAction SilentlyContinue | Remove-Item
   $n = $j[2]
-  "$($j[0]): " + [SheetPrep]::Run($sheet, (Join-Path $views 'v'), $j[3], $j[4], [bool]$j[5], $n, 4, $(if ($j.Count -gt 7) { $j[7] } else { 0 }), $(if ($j.Count -gt 8) { $j[8] } else { 0 }), [int[]]@(if ($j.Count -gt 9 -and $j[9]) { $j[9].Split(';,') | % { [int]$_ } }))
+  $rows = $(if ($j.Count -gt 10) { [int]$j[10] } else { 4 })
+  "$($j[0]): " + [SheetPrep]::Run($sheet, (Join-Path $views 'v'), $j[3], $j[4], [bool]$j[5], $n, $rows, $(if ($j.Count -gt 7) { $j[7] } else { 0 }), $(if ($j.Count -gt 8) { $j[8] } else { 0 }), [int[]]@(if ($j.Count -gt 9 -and $j[9]) { $j[9].Split(';,') | % { [int]$_ } }))
   if ($NoSprites) { continue }
   $map = $j[6].Split(',')
-  for ($t = 1; $t -le 4; $t++) {
+  for ($t = 1; $t -le $rows; $t++) {
     $out = Join-Path $Root "public\sprites\$($j[1])_$t"; New-Item -ItemType Directory -Force $out | Out-Null
     for ($c = 0; $c -lt $n; $c++) {
       if (-not $map[$c]) { continue }

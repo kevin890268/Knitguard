@@ -215,14 +215,16 @@ export const UNIT_KINDS: UnitKind[] = [
 ];
 
 /**
- * 怪物族：每族四個階段（圖：public/sprites/<id>_1…4/）。規則簡單：
- * 每族只寫第一階段的數值（size＝體型），階段越高照 MONSTER_TIER 的倍率變大、變耐打、打得更痛；第四階段是重甲。
- * 都是近戰。還沒加進屍潮（WAVE_MIX），目前只在圖鑑裡。
+ * 怪物族：每族三或四個階段（圖：public/sprites/<id>_1…/）。規則簡單：
+ * 每族只寫第一階段的數值（size＝體型），階段越高照 MONSTER_TIER 的倍率變大、變耐打、打得更痛；最高階是重甲。
+ * 三階段的族：第一階＝四階段的第一階、最高階＝四階段的第四階，中間那階取兩者之間（tierMul）。
+ * 預設近戰；有 range 的是遠程。
  */
 export interface MonsterFamily {
   id: string;
   name: string;
-  tiers: [string, string, string, string];
+  /** 各階段名稱（3 或 4 個） */
+  tiers: string[];
   hp: number;
   damage: number;
   speed: number;
@@ -235,6 +237,9 @@ export interface MonsterFamily {
   tribe?: string;
   /** 會飛（見 UnitKind.flying） */
   flying?: boolean;
+  /** 遠程：射程（格）和丟出去的東西 */
+  range?: number;
+  proj?: ProjKind;
 }
 export const MONSTERS: MonsterFamily[] = [
   { id: 'goblin', name: '👺 哥布林', tiers: ['普通哥布林', '野性哥布林', '狂暴哥布林', '魔化哥布林'], hp: 30, damage: 4, speed: 2.0, size: 0.9, color: 0x8aa04a },
@@ -246,22 +251,45 @@ export const MONSTERS: MonsterFamily[] = [
   { id: 'earth_giant', name: '🪨 土巨人族', tiers: ['岩石巨人', '石護巨人', '地脈巨人', '大地巨人'], hp: 110, damage: 10, speed: 1.0, size: 1.25, color: 0x9a8a6a, bldMul: 2 },
   { id: 'fireling', name: '🔥 火人族', tiers: ['火熔人', '烈炎人', '火焰戰士', '炎獄領主'], hp: 30, damage: 5, speed: 2.2, size: 0.85, color: 0xf07a2a, tribe: 'fire' },
   { id: 'fire_giant', name: '🌋 火巨人族', tiers: ['火焰巨人', '熔岩巨人', '烈焰巨人', '黑炎巨人'], hp: 110, damage: 11, speed: 1.0, size: 1.25, color: 0xc0502a, bldMul: 2, tribe: 'fire' },
-  { id: 'yeti', name: '❄️ 雪怪族', tiers: ['雪幼怪', '雪毛怪', '冰角雪怪', '霜巔巨雪怪'], hp: 85, damage: 8, speed: 1.5, size: 1.15, color: 0xe8f0f8 },
-  { id: 'slime', name: '🫧 黏黏族', tiers: ['小黏黏', '膠質黏黏', '酸液黏黏', '變異黏王'], hp: 45, damage: 4, speed: 1.3, size: 0.9, color: 0x6ac0e0 },
+  { id: 'yeti', name: '❄️ 雪怪', tiers: ['雪幼怪', '雪毛怪', '冰角雪怪', '霜巔巨雪怪'], hp: 85, damage: 8, speed: 1.5, size: 1.15, color: 0xe8f0f8, tribe: 'snow' },
+  { id: 'slime', name: '🫧 黏黏族', tiers: ['小黏黏', '膠質黏黏', '酸液黏黏', '變異黏王'], hp: 45, damage: 4, speed: 1.3, size: 0.9, color: 0x6ac0e0, tribe: 'slime' },
   { id: 'bat', name: '🦇 蝙蝠族', tiers: ['小蝙蝠', '血蝠', '魔蝠', '夜幕巨蝠'], hp: 25, damage: 3, speed: 2.8, size: 0.9, color: 0x6a3a5a, tribe: 'vampire', flying: true },
   { id: 'vampire', name: '🧛 吸血鬼族', tiers: ['初階吸血鬼', '菁英吸血鬼', '貴族吸血鬼', '血族始祖'], hp: 50, damage: 6, speed: 2.0, size: 1.0, color: 0x8a2a3a, tribe: 'vampire' },
   { id: 'vamp_girl', name: '🌹 吸血鬼族（少女）', tiers: ['吸血少女', '血裔少女', '夢魘少女', '血皇蘿莉'], hp: 45, damage: 6, speed: 2.1, size: 1.0, color: 0xc04a5a, tribe: 'vampire' },
   { id: 'imp', name: '😈 惡魔', tiers: ['初階惡魔', '強化惡魔', '魔化惡魔', '魔王惡魔'], hp: 35, damage: 5, speed: 2.3, size: 1.0, color: 0x5a2a3a, tribe: 'demon', flying: true },
   { id: 'imp2', name: '👿 惡魔（第二版）', tiers: ['惡魔 Ⅰ', '惡魔 Ⅱ', '惡魔 Ⅲ', '惡魔 Ⅳ'], hp: 35, damage: 5, speed: 2.3, size: 1.0, color: 0x4a2a3a, tribe: 'demon', flying: true },
+  // ---- 三階段（2026-11-14 的圖；設定圖上沒有階段名稱，先用 Ⅰ／Ⅱ／Ⅲ）
+  // 蜥蜴族：戰士、重甲戰士、弩手（遠程）、薩滿（遠程）、骸骨蜥蜴戰士
+  { id: 'lizard_warrior', name: '🦎 蜥蜴戰士', tiers: ['蜥蜴戰士 Ⅰ', '蜥蜴戰士 Ⅱ', '蜥蜴戰士 Ⅲ'], hp: 55, damage: 7, speed: 1.7, size: 1.05, color: 0x6a8a3a, tribe: 'lizard' },
+  { id: 'lizard_heavy', name: '🦎 蜥蜴重甲戰士', tiers: ['蜥蜴重甲戰士 Ⅰ', '蜥蜴重甲戰士 Ⅱ', '蜥蜴重甲戰士 Ⅲ'], hp: 85, damage: 7, speed: 1.4, size: 1.15, color: 0x5a6a3a, tribe: 'lizard' },
+  { id: 'lizard_crossbow', name: '🦎 蜥蜴弩手', tiers: ['蜥蜴弩手 Ⅰ', '蜥蜴弩手 Ⅱ', '蜥蜴弩手 Ⅲ'], hp: 40, damage: 6, speed: 1.7, size: 1.0, color: 0x7a8a4a, tribe: 'lizard', range: 5.5, proj: 'arrow' },
+  { id: 'lizard_shaman', name: '🦎 蜥蜴薩滿', tiers: ['蜥蜴薩滿 Ⅰ', '蜥蜴薩滿 Ⅱ', '蜥蜴薩滿 Ⅲ'], hp: 40, damage: 5, speed: 1.6, size: 1.0, color: 0x6a5a3a, tribe: 'lizard', range: 4.5, proj: 'pebble' },
+  { id: 'bone_lizard', name: '🦴 骸骨蜥蜴戰士', tiers: ['骸骨蜥蜴戰士 Ⅰ', '骸骨蜥蜴戰士 Ⅱ', '骸骨蜥蜴戰士 Ⅲ'], hp: 50, damage: 8, speed: 1.8, size: 1.05, color: 0xd8c8a0, tribe: 'lizard' },
+  // 黏黏族（和原本的黏黏一族）：冰晶史萊姆、彩虹史萊姆
+  { id: 'ice_slime', name: '🧊 冰晶史萊姆', tiers: ['冰晶史萊姆 Ⅰ', '冰晶史萊姆 Ⅱ', '冰晶史萊姆 Ⅲ'], hp: 50, damage: 4, speed: 1.3, size: 0.95, color: 0x7ab8f0, tribe: 'slime' },
+  { id: 'rainbow_slime', name: '🌈 彩虹史萊姆', tiers: ['彩虹史萊姆 Ⅰ', '彩虹史萊姆 Ⅱ', '彩虹史萊姆 Ⅲ'], hp: 45, damage: 5, speed: 1.4, size: 0.95, color: 0xd8a0e8, tribe: 'slime' },
+  // 雪怪族（和原本的雪怪一族）：冰雪妖姬（遠程）、冰雪精靈（遠程）、冰雪巨獸、冰霜巨魔、雪團
+  { id: 'ice_queen', name: '❄️ 冰雪妖姬', tiers: ['冰雪妖姬 Ⅰ', '冰雪妖姬 Ⅱ', '冰雪妖姬 Ⅲ'], hp: 45, damage: 6, speed: 1.6, size: 1.0, color: 0xc8d8f8, tribe: 'snow', range: 5, proj: 'water' },
+  { id: 'snow_sprite', name: '❄️ 冰雪精靈', tiers: ['冰雪精靈 Ⅰ', '冰雪精靈 Ⅱ', '冰雪精靈 Ⅲ'], hp: 35, damage: 4, speed: 1.8, size: 0.9, color: 0xe0e8ff, tribe: 'snow', range: 4.5, proj: 'water' },
+  { id: 'snow_beast', name: '❄️ 冰雪巨獸', tiers: ['冰雪巨獸 Ⅰ', '冰雪巨獸 Ⅱ', '冰雪巨獸 Ⅲ'], hp: 100, damage: 9, speed: 1.2, size: 1.25, color: 0xd8e4f4, tribe: 'snow', bldMul: 1.5 },
+  { id: 'frost_troll', name: '❄️ 冰霜巨魔', tiers: ['冰霜巨魔 Ⅰ', '冰霜巨魔 Ⅱ', '冰霜巨魔 Ⅲ'], hp: 90, damage: 10, speed: 1.3, size: 1.15, color: 0x7890b8, tribe: 'snow' },
+  { id: 'snowball', name: '❄️ 雪團', tiers: ['雪團 Ⅰ', '雪團 Ⅱ', '雪團 Ⅲ'], hp: 40, damage: 4, speed: 1.8, size: 0.9, color: 0xf0f4ff, tribe: 'snow' },
+  // 殭屍：和吸血鬼族一起；木乃伊：先自己一族；火焰精靈：和火焰族一起
+  { id: 'zombie', name: '🧟 殭屍', tiers: ['殭屍 Ⅰ', '殭屍 Ⅱ', '殭屍 Ⅲ'], hp: 50, damage: 6, speed: 1.3, size: 1.0, color: 0x8a9a7a, tribe: 'vampire' },
+  { id: 'mummy', name: '🧟 木乃伊族', tiers: ['木乃伊 Ⅰ', '木乃伊 Ⅱ', '木乃伊 Ⅲ'], hp: 60, damage: 7, speed: 1.3, size: 1.05, color: 0xc8b890 },
+  { id: 'fire_sprite', name: '🔥 火焰精靈', tiers: ['火焰精靈 Ⅰ', '火焰精靈 Ⅱ', '火焰精靈 Ⅲ'], hp: 30, damage: 5, speed: 2.0, size: 0.9, color: 0xf08a2a, tribe: 'fire' },
 ];
 /** 合成一個種族的怪物族（圖鑑、對打測試都當同一族） */
 export const MONSTER_TRIBES: Record<string, string> = {
   forest: '🌲 墮落森林', // 樹人雜兵、壞樹人族、壞樹妖族
-  fire: '🔥 火焰族', // 火人族、火巨人族
-  vampire: '🦇 吸血鬼族', // 蝙蝠族、吸血鬼族、吸血鬼族（少女）
+  fire: '🔥 火焰族', // 火人族、火巨人族、火焰精靈
+  vampire: '🦇 吸血鬼族', // 蝙蝠族、吸血鬼族、吸血鬼族（少女）、殭屍
   demon: '😈 惡魔族', // 惡魔、惡魔（第二版）
+  lizard: '🦎 蜥蜴族', // 蜥蜴戰士、蜥蜴重甲戰士、蜥蜴弩手、蜥蜴薩滿、骸骨蜥蜴戰士
+  slime: '🫧 黏黏族', // 黏黏、冰晶史萊姆、彩虹史萊姆
+  snow: '❄️ 雪怪族', // 雪怪、冰雪妖姬、冰雪精靈、冰雪巨獸、冰霜巨魔、雪團
 };
-/** 階段 1→4 的倍率 */
+/** 階段 1→4 的倍率（三階段的族用 tierMul 換算） */
 export const MONSTER_TIER = {
   hp: [1, 2, 4, 8],
   damage: [1, 1.6, 2.6, 4.5],
@@ -269,17 +297,25 @@ export const MONSTER_TIER = {
   speed: [1, 1, 0.95, 0.85],
   reward: [1, 2, 5, 15],
 };
-/** MONSTER_KIND[族][階段 0–3]＝兵種編號（接在 UNIT_KINDS 後面） */
+/** 第 t 階（共 n 階）的倍率：n＝4 直接查表；n＝3 時把階段攤到 0–3 之間（0、1.5、3）內插 */
+export function tierMul(table: number[], t: number, n: number): number {
+  const pos = n <= 1 ? 0 : (t * (table.length - 1)) / (n - 1), i = Math.floor(pos), f = pos - i;
+  return i + 1 < table.length ? table[i] + (table[i + 1] - table[i]) * f : table[i];
+}
+/** MONSTER_KIND[族][階段]＝兵種編號（接在 UNIT_KINDS 後面） */
 export const MONSTER_KIND: number[][] = MONSTERS.map((m) =>
   m.tiers.map((name, t) => {
-    const s = m.size * MONSTER_TIER.size[t];
+    const n = m.tiers.length, mul = (tb: number[]) => tierMul(tb, t, n);
+    const lv = Math.round((t * 3) / Math.max(1, n - 1)); // 換算成 0–3 的等級（防禦、重甲）
+    const s = m.size * mul(MONSTER_TIER.size);
     UNIT_KINDS.push({
       name, team: Team.Enemy,
-      hp: Math.round(m.hp * MONSTER_TIER.hp[t]), damage: Math.round(m.damage * MONSTER_TIER.damage[t]),
-      speed: +(m.speed * MONSTER_TIER.speed[t]).toFixed(2), radius: +(0.3 * s).toFixed(2),
-      attackCd: 1.2, reach: 0.15, aggro: 4, reward: MONSTER_TIER.reward[t], color: m.color,
+      hp: Math.round(m.hp * mul(MONSTER_TIER.hp)), damage: Math.round(m.damage * mul(MONSTER_TIER.damage)),
+      speed: +(m.speed * mul(MONSTER_TIER.speed)).toFixed(2), radius: +(0.3 * s).toFixed(2),
+      attackCd: m.range ? 1.6 : 1.2, reach: 0.15, aggro: m.range ? m.range + 1 : 4, reward: Math.round(mul(MONSTER_TIER.reward)), color: m.color,
       scale: +(0.7 * s).toFixed(2), model: 'monster',
-      armor: t === 3 ? H : L, meleeDef: t, rangedDef: t, bldMul: m.bldMul, flying: m.flying,
+      armor: t === n - 1 ? H : L, meleeDef: lv, rangedDef: lv, bldMul: m.bldMul, flying: m.flying,
+      range: m.range, proj: m.proj,
     });
     return UNIT_KINDS.length - 1;
   }));

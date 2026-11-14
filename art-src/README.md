@@ -67,6 +67,31 @@
 
 敵人都是**四階段**（還沒放進遊戲）。`tools/cutout-enemy-sheets.ps1` 整批重切（`-Only <資料夾>` 只切一張）：去掉左邊的名稱標籤和上面的角度標籤，切成 4 排 × N 欄放進 `views/v_1…`，再照「臉朝畫面哪邊」複製到 `public/sprites/<名字>_<階段>/`（設定圖上的「右側」在畫面上是臉朝左；第一欄「俯角 45°」不用）。魔像那張設定圖已刪掉。
 
+### 三階段敵人（2026-11-14，還沒放進遊戲、還沒分族群）
+
+| 類別 | 敵人 | 資料夾 `enemies/` | 遊戲圖 `public/sprites/` |
+|---|---|---|---|
+| 🦎 蜥蜴 | 蜥蜴戰士 | `lizard-warrior/` | `lizard_warrior_1…3/` |
+| 🦎 蜥蜴 | 蜥蜴重甲戰士 | `lizard-heavy/` | `lizard_heavy_1…3/` |
+| 🦎 蜥蜴 | 蜥蜴弩手 | `lizard-crossbow/` | `lizard_crossbow_1…3/` |
+| 🦎 蜥蜴 | 蜥蜴薩滿 | `lizard-shaman/` | `lizard_shaman_1…3/` |
+| 🦎 蜥蜴 | 骸骨蜥蜴戰士 | `bone-lizard/` | `bone_lizard_1…3/` |
+| ❄️ 冰雪 | 冰晶史萊姆 | `ice-slime/` | `ice_slime_1…3/` |
+| ❄️ 冰雪 | 冰雪妖姬 | `ice-queen/` | `ice_queen_1…3/` |
+| ❄️ 冰雪 | 冰雪精靈 | `snow-sprite/` | `snow_sprite_1…3/` |
+| ❄️ 冰雪 | 冰雪巨獸 | `snow-beast/` | `snow_beast_1…3/` |
+| ❄️ 冰雪 | 冰霜巨魔 | `frost-troll/` | `frost_troll_1…3/` |
+| ❄️ 冰雪 | 雪團 | `snowball/` | `snowball_1…3/` |
+| 🧟 不死 | 殭屍 | `zombie/` | `zombie_1…3/` |
+| 🧟 不死 | 木乃伊 | `mummy/` | `mummy_1…3/` |
+| 🔥 火焰 | 火焰精靈 | `fire-sprite/` | `fire_sprite_1…3/` |
+| 🫧 史萊姆 | 彩虹史萊姆 | `rainbow-slime/` | `rainbow_slime_1…3/` |
+
+每張 3 排（三個階段），每排最左一張大的 45° 圖＋ 8 個角度。`tools/cutout-3tier.ps1` 整批重切（`-Only <資料夾>` 只切一張）：
+每一排照「一塊一隻」切（角色黏在一起的兩張蜥蜴用收縮再長回來分開），沒有直線切口。角度有兩種排法（看臉朝哪邊確認過）：
+- 殭屍、木乃伊：左前、左側、左後、背面、右後、右側、右前、正面（8 個方向都有）
+- 其他：左前、左側、左後、（一張介於左後和背面，不用）、背面、右後、右側、正面 → 沒有右前，遊戲用左前鏡像
+
 ## 每個兵種資料夾
 - 設定圖原檔
 - `views/v0.png…`：從設定圖「多視角」那一排依序裁下的每個角度（要重裁用 `tools/recrop-views.ps1`：在設定圖上找到原本的位置、照主體重裁，隔壁的東西和文字塗成底色）
@@ -115,6 +140,11 @@
 | 🗼 高塔 | `stone-tower/` | `stone_tower` | 3x3（設定圖上標明；塔頂 2x2 可用空間） |
 | 🧱 城牆 | `wall/` | `wall` | 1x1（取代原本程式畫的毛氈牆） |
 | 🏹 箭塔 | `archer-tower/` | `archer_tower` | 1x1（取代藍色的 `watchtower`，那組先留著沒用） |
+| 💰 奇幻寶庫 | `treasury/` | `treasury` | （2026-11-14 新圖，還沒放進遊戲） |
+| 🛏️ 奇幻庇護所 | `shelter/` | `shelter` | （2026-11-14 新圖，還沒放進遊戲） |
+| 🔮 女巫屋舍 | `witch-house/` | `witch_house` | （2026-11-14 新圖，還沒放進遊戲） |
+| 🪵 木製尖刺路障 | `spike-barricade/` | `spike_barricade` | （2026-11-14 新圖，還沒放進遊戲） |
+| ⚙️ 特殊科技研究院 | `tech-institute/` | `tech_institute` | （2026-11-14 新圖，還沒放進遊戲） |
 | 🚪 城門 | `gate/` | `gate` | 2x2 |
 | 🌬️ 風車 | `windmill/` | `windmill` | 2x2 |
 | 🛠️ 工程工坊 | `workshop/` | `workshop` | 2x2 |
@@ -130,10 +160,12 @@
 - 地圖上的樹林每 7×7 格一區用同一種樹，偶爾夾一棵天然果樹；用 `tools/cutout-props-batch.ps1` 重裁
 - `props/rocks/`：32 種石頭 → `rock_1…32.png`（每 8 個一組：灰石、砂岩、青苔、水晶）；地圖上每 6×6 格一區用同一種
 - `props/ores/`：24 種礦石 → `ore_1…24.png`（鐵、金、煤）；目前只是石頭堆裡偶爾出現的外觀，還不能採
+- `props/loot/`：戰利品 4 排 × 5 堆（每排由少到多）→ `public/sprites/props/loot_<主題>_1…5.png`：supplies 物資（麻袋、木箱、寶箱）、gear 裝備（盾、頭盔、劍）、magic 魔法（藥水、書、水晶）、treasure 財寶（錢幣、珠寶、王冠）。還沒放進遊戲
 - 已去背的網格圖用 `tools/split-grid.ps1 -Cols 8,8,8,8` 切
 | 軍營：羊、刺刺、狗、鳥人、樹人、魚人、蛛人、狼人、牛、豬 | `barracks-<族>/` | `barracks_<族>` | 2x2 |
 
 建築只用設定圖上的「45° 俯視（主視角）」一張：`tools/cutout-building.ps1` 裁下來並去背成透明 PNG（背景是模糊的漸層光暈，用「顏色平滑延伸」判斷背景；會丟掉旁邊的標籤碎片和被裁到的細橫線）。
+2026-11-14 的五棟（寶庫、庇護所、女巫屋舍、尖刺路障、特殊科技研究院）已經是透明背景：用 `tools/split-touching.ps1`（整張、`-MinFrac 0.3`）只留最大的三塊＝三個階段，下面的小張旋轉圖和標題自動略過。
 `tools/cutout-buildings-batch.ps1` 記錄每張設定圖三個階段的裁切位置，可以整批重裁（`-Only <資料夾>` 只裁一個）。
 遊戲裡的大小：最高等級的寬度 = 佔地菱形寬 × 1.3，低等級照原圖比例。
 
