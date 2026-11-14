@@ -63,7 +63,7 @@ export interface Trap { x: number; y: number; owner: number; }
 export interface Thorns { x: number; y: number; r: number; dps: number; t: number; dur: number; team: number; }
 
 /** 一閃而過的範圍效果（吠叫、治療、號角），只給繪圖用 */
-export interface Fx { x: number; y: number; r: number; t: number; kind: 'bark' | 'heal' | 'horn' | 'trap' | 'splash'; }
+export interface Fx { x: number; y: number; r: number; t: number; kind: 'bark' | 'heal' | 'horn' | 'trap' | 'splash' | 'blast' | 'pierce'; }
 
 export const MAX_UNITS = 12000;
 
@@ -141,10 +141,10 @@ export class World {
   /** 等著出生的敵人：kind, x, y, 行軍速度, 出生時間 五個一組（依出生時間排好） */
   private spawnQueue: number[] = [];
   /**
-   * 一波敵人分散在這麼多秒內出生，到達的節奏：先只有雜兵 → 開始有大型 → 大型越來越多 → 最後零零星星收尾。
+   * 一波敵人分散在這麼多秒內出生（30 秒內全部出完），到達的節奏：先只有雜兵 → 開始有大型 → 大型越來越多 → 最後零零星星收尾。
    * 大家用同一個行軍速度，所以出生順序≈到達順序。
    */
-  waveSpread = 80;
+  waveSpread = 30;
   private nextBid = 1;
   private tmp = new Int32Array(4096);
   /** 給 hit() 裡面查周圍用（hit 常在用 tmp 的迴圈裡被呼叫，不能共用） */
@@ -694,7 +694,11 @@ export class World {
    * (x, y)：目的地（移動／攻擊移動／巡邏）；target：攻擊的敵人（attack）
    * queue：Shift 排在目前指令之後；form：陣型
    */
-  command(ids: number[], type: CommandType, x: number, y: number, opts: { queue?: boolean; form?: Formation; target?: number } = {}): void {
+  /**
+   * 下指令。opts.facing＝陣型朝向（單位向量 [fx, fy]，右鍵按住拖曳轉出來的）；沒給就朝「從部隊中心往目的地」的方向。
+   * 走到後每隻都會轉身面向這個方向。
+   */
+  command(ids: number[], type: CommandType, x: number, y: number, opts: { queue?: boolean; form?: Formation; target?: number; facing?: [number, number] } = {}): void {
     const u = this.units;
     ids = ids.filter((i) => u.alive[i] && u.team[i] === Team.Player);
     if (!ids.length) return;
@@ -733,7 +737,10 @@ export class World {
     let fx = x - cx, fy = y - cy;
     const fd = Math.hypot(fx, fy);
     if (fd < 0.01) { fx = 1; fy = 0; } else { fx /= fd; fy /= fd; }
+    if (opts.facing) [fx, fy] = opts.facing;
     const slots = formationSlots(ids, sx, sy, u.kind, u.rad, x, y, fx, fy, opts.form ?? 'line');
+    const endFace = Math.atan2(fx, fy);
+    for (const i of ids) u.endFace[i] = endFace;
 
     // 從起點能走到哪裡（點在水裡、對岸、石頭上 → 改成最近走得到的地方）；巡邏的回程也用它
     const W = this.map.w, startGoals = new Set<number>();
@@ -754,6 +761,23 @@ export class World {
       this.issue(i, { ord, x: slots[k * 2], y: slots[k * 2 + 1], t: -1, path, px: sx[i], py: sy[i], path2 }, queue);
       u.spdCap[i] = n > 1 ? minSpeed : 0; // 陣型一起走：配合最慢的
     });
+  }
+
+  /**
+   * 陣型預覽（右鍵按住時畫綠色圈圈用）：ids 移動到 (x, y)、朝 (fx, fy) 時每隻站哪裡。
+   * 回傳 [x0, y0, x1, y1, …]，順序和 ids 一樣；沒給朝向就和 command 一樣朝「從部隊中心往目的地」
+   */
+  previewFormation(ids: number[], x: number, y: number, form: Formation, facing?: [number, number]): { slots: Float32Array; fx: number; fy: number } {
+    const u = this.units;
+    ids = ids.filter((i) => u.alive[i] && u.team[i] === Team.Player);
+    let cx = 0, cy = 0;
+    for (const i of ids) { cx += u.x[i]; cy += u.y[i]; }
+    cx /= Math.max(1, ids.length); cy /= Math.max(1, ids.length);
+    let fx = x - cx, fy = y - cy;
+    const fd = Math.hypot(fx, fy);
+    if (fd < 0.01) { fx = 1; fy = 0; } else { fx /= fd; fy /= fd; }
+    if (facing) [fx, fy] = facing;
+    return { slots: formationSlots(ids, u.x, u.y, u.kind, u.rad, x, y, fx, fy, form), fx, fy };
   }
 
   /** 單位的佇列指令（給畫面顯示路線用） */
@@ -1027,6 +1051,7 @@ export class World {
       if (along < 0 || along > range) continue;
       if (Math.abs(rx * dy - ry * dx) > width + u.rad[j]) continue;
       this.hit(i, j, true);
+      this.fx.push({ x: u.x[j], y: u.y[j], r: 0.35, t: 0.3, kind: 'pierce' }); // 穿心：被射穿的每一隻都冒一下紅光
     }
     const dur = range / PROJ.spike.speed;
     this.shots.push({ x1: x, y1: y, x2: x + dx * range, y2: y + dy * range, t: dur, dur, h1: 0.5, kind: 'spike' });
@@ -1049,7 +1074,7 @@ export class World {
       if (f.at > this.time) return true;
       const sk = u.alive[f.i] ? UNIT_KINDS[u.kind[f.i]].skill : undefined;
       if (sk?.type === 'splash' && u.alive[f.i]) {
-        // 水砲：落點周圍的敵人都受傷（目標死了也照樣濺開，落點用目標最後的位置）
+        // 水砲、投石車：落點周圍的敵人都受傷（目標死了也照樣濺開，落點用目標最後的位置）
         const x = u.x[f.t], y = u.y[f.t];
         const n = this.hash.queryInto(x, y, sk.radius, this.tmp);
         for (let q = 0; q < n; q++) {
@@ -1058,7 +1083,7 @@ export class World {
           if ((u.x[j] - x) ** 2 + (u.y[j] - y) ** 2 > sk.radius * sk.radius) continue;
           this.hit(f.i, j, true);
         }
-        this.fx.push({ x, y, r: sk.radius, t: 0.35, kind: 'splash' });
+        this.fx.push({ x, y, r: sk.radius, t: 0.35, kind: UNIT_KINDS[u.kind[f.i]].proj === 'water' ? 'splash' : 'blast' });
       } else if (u.alive[f.i] && u.alive[f.t] && u.team[f.i] !== u.team[f.t]) this.hit(f.i, f.t, true);
       return false;
     });
@@ -1395,6 +1420,8 @@ export class World {
       }
       if (!attacking && u.vx[i] * u.vx[i] + u.vy[i] * u.vy[i] > 0.04) {
         u.face[i] = lerpAngle(u.face[i], Math.atan2(u.vx[i], u.vy[i]), Math.min(1, dt * 10));
+      } else if (!attacking && ord === Ord.Idle && t < 0 && u.endFace[i] === u.endFace[i]) {
+        u.face[i] = lerpAngle(u.face[i], u.endFace[i], Math.min(1, dt * 6)); // 站定了：轉向指令給的方向
       }
     }
   }
@@ -1479,6 +1506,17 @@ export class World {
     const u = this.units, hs = this.hash, cols = hs.cols, rows = hs.rows;
     // 熱迴圈：陣列先拿到區域變數（每一對都要讀很多次）
     const X = u.x, Y = u.y, R = u.rad, alive = u.alive, kind = u.kind, start = hs.cellStart, items = hs.items;
+    // 推擠的「重量」：
+    //   敵我之間：我方站崗的兵（待命、沒在走）×4 → 敵人擠不過防線，要停下來打或繞路
+    //   自己人之間：有指令在走的兵碰到站著的隊友 → 站著的讓路（×0.25），不然從人群中間出不來
+    const team = u.team, order = u.order, VX = u.vx, VY = u.vy;
+    const standing = (k: number) => team[k] === Team.Player && order[k] === Ord.Idle && VX[k] * VX[k] + VY[k] * VY[k] < 0.25;
+    const mass = (k: number, o: number) => {
+      const m = R[k] * R[k];
+      if (team[k] !== team[o]) return standing(k) ? m * 4 : m;
+      if (team[k] === Team.Player && order[k] === Ord.Idle && order[o] !== Ord.Idle) return m * 0.25;
+      return m;
+    };
     const pushK = this.moveTuning.push;
     // 1) 單位之間互推：照建表時的格子逐格走，每一對只比一次＝同一格裡排在後面的，加上「前方」4 格（右、左下、下、右下）裡的全部
     //    （3x3 格每對會被兩邊各看一次；這樣少走一半。用建表時的格子，單位在這一輪被推動也不會重算或漏算）
@@ -1488,7 +1526,7 @@ export class World {
       for (let p = cs; p < ce; p++) {
         const i = items[p];
         if (!alive[i]) continue;
-        const ri = R[i], mi = ri * ri, li = LAYER[kind[i]];
+        const ri = R[i], li = LAYER[kind[i]];
         for (let f = -2; f < 8; f += 2) {
           let qs: number, qe: number;
           if (f < 0) { qs = p + 1; qe = ce; } // 同一格：排在後面的
@@ -1509,7 +1547,7 @@ export class World {
             // 每 tick 只推開重疊的 40%（推太滿會在人群裡來回彈，看起來一直抖；0.8 時人群抖動約 4 倍）
             const push = (min - d) * pushK;
             const nx = dx / d, ny = dy / d;
-            const mj = rj * rj, wi = mj / (mi + mj); // 大隻的比較推不動
+            const mi = mass(i, j), mj = mass(j, i), wi = mj / (mi + mj); // 大隻的、站崗的比較推不動；站著的隊友會讓路
             X[i] -= nx * push * wi; Y[i] -= ny * push * wi;
             X[j] += nx * push * (1 - wi); Y[j] += ny * push * (1 - wi);
           }

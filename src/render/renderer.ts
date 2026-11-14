@@ -34,6 +34,8 @@ export class GameRenderer {
   selected: Building | null = null;
   /** 3D 版還沒畫資源聚落的選取框（只是讓介面能共用） */
   selectedDeposit = -1;
+  /** 3D 版還沒畫陣型預覽（只是讓介面能共用） */
+  formPreview: { slots: Float32Array; ax: number; ay: number; fx: number; fy: number; attack: boolean } | null = null;
   /** 選取的部隊（3D 版先不畫選取圈） */
   unitSel: Uint8Array | null = null;
   /** 下指令時地上閃一下的標記（3D 版先不畫） */

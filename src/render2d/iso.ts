@@ -45,6 +45,8 @@ export class IsoCamera {
 
   /** WASD 能不能移動鏡頭（main.ts 設成「沒選部隊時」） */
   allowWasd: () => boolean = () => true;
+  /** 右鍵拖曳能不能移動鏡頭（main.ts 設成「沒選部隊時」；選了部隊右鍵按住是轉陣型） */
+  allowRightDrag: () => boolean = () => true;
   private keys = new Set<string>();
   private dragging = false;
   private lastX = 0;
@@ -61,7 +63,7 @@ export class IsoCamera {
       this.cy += before[1] - after[1];
     }, { passive: false });
     dom.addEventListener('pointerdown', (e) => {
-      if (e.button === 1 || e.button === 2) {
+      if (e.button === 1 || (e.button === 2 && this.allowRightDrag())) {
         this.dragging = true;
         this.lastX = e.clientX;
         this.lastY = e.clientY;

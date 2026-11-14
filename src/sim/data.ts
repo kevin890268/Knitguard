@@ -12,11 +12,11 @@ export const Armor = { Light: 0, Heavy: 1 } as const;
  * 兵種技能（每種兵最多一個，全部自動發動）。數值都是固定值，之後用模擬調整。
  *   horn    號角手：附近我方攻擊 +atk（不疊加，取最大）
  *   curl    刺球衛：附近有敵人就自動縮球；縮著時防禦 +def、移動 ×(1−slow)、近戰打它的敵人受 reflect 反傷
- *   pierce  尖刺弩砲：射出的刺沿直線貫穿，打到線上 width 範圍內的所有敵人
+ *   pierce  弩砲（尖刺弩砲、蛛人弩砲）：射出的刺沿直線貫穿，打到線上 width 範圍內的所有敵人（穿心）
  *   trap    陷阱工程師（村民，不攻擊）：每 cd 秒在敵人來的方向放一個陷阱（最多 max 個）；踩到受 dmg 傷害並變慢
  *   bark    吠叫兵：攻擊時對自己周圍 radius 內的敵人吼叫，讓它們變慢（移動、攻擊速度）
  *   heal    聖伯納救援犬：每 cd 秒治療範圍內最需要的我方 amount 血
- *   splash  水砲攻城器：水彈落地時，半徑 radius 內的敵人都受傷害
+ *   splash  水砲、投石車：落地時半徑 radius 內的敵人都受傷（水砲是水花、投石車是碎石）害
  *   anchor  船錨兵：被打中的敵人會被拖慢（和吠叫一樣的減速）
  *   guard   巨盾兵：塔盾擋箭，周圍 radius 內的隊友被遠程打時防禦 +def
  *   cleave  鏈錘兵：打目標時，目標周圍 radius 內的其他敵人也一起挨打
@@ -150,7 +150,7 @@ export const UNIT_KINDS: UnitKind[] = [
   // ---- 羊族
   { name: '長槍兵', team: P, hp: 105, speed: 2.2, radius: 0.32, damage: 11, attackCd: 1.3, reach: 0.35, aggro: 4.5, reward: 0, color: 0xfffaf0, scale: 0.7, model: 'sheep', armor: L, meleeDef: 2, rangedDef: 0, bonusLarge: 8, bonusCav: 17 },
   { name: '弓箭手', team: P, hp: 75, speed: 2.4, radius: 0.28, damage: 6, attackCd: 1.2, reach: 0.1, aggro: 7.5, reward: 0, color: 0xfffaf0, scale: 0.62, model: 'sheep', armor: L, range: 6, bonusLight: 6, proj: 'arrow' },
-  { name: '投石車', team: P, hp: 180, speed: 1.2, radius: 0.5, damage: 34, attackCd: 3.2, reach: 0.1, aggro: 10.5, reward: 0, color: 0xfffaf0, scale: 1.15, model: 'sheep', armor: H, meleeDef: 0, rangedDef: 10, range: 9, bonusHeavy: 15, proj: 'stone', wheeled: true, upgAtk: 0 },
+  { name: '投石車', team: P, hp: 180, speed: 1.2, radius: 0.5, damage: 34, attackCd: 3.2, reach: 0.1, aggro: 10.5, reward: 0, color: 0xfffaf0, scale: 1.15, model: 'sheep', armor: H, meleeDef: 0, rangedDef: 10, range: 9, bonusHeavy: 15, proj: 'stone', wheeled: true, upgAtk: 0, skill: { type: 'splash', radius: 1 } },
   { name: '號角手', team: P, hp: 60, speed: 2.4, radius: 0.28, damage: 0, attackCd: 1, reach: 0.1, aggro: 0, reward: 0, color: 0xfffaf0, scale: 0.62, model: 'sheep', armor: L, support: true, skill: { type: 'horn', radius: 4, atk: 3 } },
   // ---- 刺刺族
   { name: '刺球衛', team: P, hp: 125, speed: 1.8, radius: 0.38, damage: 7, attackCd: 1.25, reach: 0.15, aggro: 4, reward: 0, color: 0xfffaf0, scale: 0.75, model: 'sheep', armor: H, meleeDef: 3, rangedDef: 3, skill: { type: 'curl', radius: 2.2, def: 4, reflect: 2, slow: 0.8 }, upgAtk: 1 },
@@ -166,7 +166,7 @@ export const UNIT_KINDS: UnitKind[] = [
   { name: '槌頭兵', team: P, hp: 110, speed: 2.0, radius: 0.33, damage: 9, attackCd: 1.4, reach: 0.15, aggro: 4.5, reward: 0, color: 0xf4b6c2, scale: 0.7, model: 'sheep', armor: L, meleeDef: 1, bonusHeavy: 6, rangedDef: 1 },
   { name: '弩兵', team: P, hp: 75, speed: 2.1, radius: 0.3, damage: 11, attackCd: 1.8, reach: 0.1, aggro: 8, reward: 0, color: 0xf4b6c2, scale: 0.66, model: 'sheep', armor: L, range: 6, bonusHeavy: 14, proj: 'arrow', upgAtk: 2 },
   { name: '巨槌兵', team: P, hp: 180, speed: 1.5, radius: 0.45, damage: 16, attackCd: 1.9, reach: 0.2, aggro: 4.5, reward: 0, color: 0xf4b6c2, scale: 0.95, model: 'sheep', armor: H, meleeDef: 4, rangedDef: 3, bonusHeavy: 10, upgAtk: 2 },
-  { name: '豬人投石車', team: P, hp: 180, speed: 1.1, radius: 0.5, damage: 32, attackCd: 3.4, reach: 0.1, aggro: 10.5, reward: 0, color: 0xf4b6c2, scale: 1.1, model: 'sheep', armor: H, meleeDef: 0, rangedDef: 10, range: 9, bonusHeavy: 15, proj: 'stone', wheeled: true, upgAtk: 0 },
+  { name: '豬人投石車', team: P, hp: 180, speed: 1.1, radius: 0.5, damage: 32, attackCd: 3.4, reach: 0.1, aggro: 10.5, reward: 0, color: 0xf4b6c2, scale: 1.1, model: 'sheep', armor: H, meleeDef: 0, rangedDef: 10, range: 9, bonusHeavy: 15, proj: 'stone', wheeled: true, upgAtk: 0, skill: { type: 'splash', radius: 1 } },
   // ---- 牛人族（救回的良善牛人；牛族軍營輪流訓練）。還沒有圖，暫用羊人的模型
   // 輕型斧頭兵：快、打輕甲有加成　輕型弓箭手：便宜的遠程　重型巨斧兵：重甲，打大型有加成　重型衝撞車：很硬很慢的近戰攻城車，一撞傷害很高
   { name: '輕型斧頭兵', team: P, hp: 110, speed: 2.5, radius: 0.32, damage: 9, attackCd: 1.1, reach: 0.15, aggro: 5, reward: 0, color: 0xd9b48a, scale: 0.7, model: 'sheep', armor: L, meleeDef: 1, bonusLight: 4 },
@@ -183,7 +183,7 @@ export const UNIT_KINDS: UnitKind[] = [
   // 輕型快爪手：最快的近戰、出手很快　輕型投石手：便宜的短程　巨型配重投石機：射程最遠、單發最重、非常慢　輕型狂化狼人：血少時狂化（攻擊、移動變快）
   { name: '輕型快爪手', team: P, hp: 105, speed: 3.4, radius: 0.3, damage: 7, attackCd: 0.6, reach: 0.12, aggro: 5.5, reward: 0, color: 0x9a9a9a, scale: 0.68, model: 'sheep', armor: L, skill: { type: 'pounce', bonus: 14, run: 0.6 }, bonusRanged: 4 },
   { name: '輕型投石手', team: P, hp: 70, speed: 2.6, radius: 0.28, damage: 8, attackCd: 1.3, reach: 0.1, aggro: 6.5, reward: 0, color: 0x9a9a9a, scale: 0.64, model: 'sheep', armor: L, range: 5, bonusHeavy: 3, proj: 'pebble' },
-  { name: '巨型配重投石機', team: P, hp: 300, speed: 0.8, radius: 0.65, damage: 70, attackCd: 5, reach: 0.1, aggro: 12.5, reward: 0, color: 0x9a9a9a, scale: 1.3, model: 'sheep', armor: H, meleeDef: 0, rangedDef: 10, range: 11, bonusHeavy: 20, proj: 'boulder', wheeled: true, upgAtk: 0 },
+  { name: '巨型配重投石機', team: P, hp: 300, speed: 0.8, radius: 0.65, damage: 70, attackCd: 5, reach: 0.1, aggro: 12.5, reward: 0, color: 0x9a9a9a, scale: 1.3, model: 'sheep', armor: H, meleeDef: 0, rangedDef: 10, range: 11, bonusHeavy: 20, proj: 'boulder', wheeled: true, upgAtk: 0, skill: { type: 'splash', radius: 1.4 } },
   { name: '輕型狂化狼人', team: P, hp: 140, speed: 2.8, radius: 0.33, damage: 12, attackCd: 1.1, reach: 0.15, aggro: 5.5, reward: 0, color: 0x9a9a9a, scale: 0.72, model: 'sheep', armor: L, skill: { type: 'rage', below: 0.5, atkSpeed: 0.45, moveSpeed: 0.35, deep: 0.3, dmg: 0.2, regen: 4 }, meleeDef: 1 },
   // ---- 魚人族（魚人族軍營輪流訓練）。種族特色：出血（打中的敵人持續掉血）。還沒有圖，暫用羊人的模型
   // 輕型魚叉兵：短程丟魚叉、打大型有加成　輕型魚矛兵：長矛近戰、碰得比較遠　輕型水砲攻城器：水彈落地濺開、打一片　重型魚人船錨兵：重甲、慢，船錨打中會拖慢敵人
@@ -195,7 +195,7 @@ export const UNIT_KINDS: UnitKind[] = [
   // 輕型近戰傘兵：吊著蛛絲從天而降，快、專挑遠程兵　輕型遠程蛛網兵：蛛網打中會減速　重型遠程弩砲：射程長、打重甲和攻城器　重型鏈錘兵：重甲，鏈錘橫掃周圍
   { name: '輕型近戰傘兵', team: P, hp: 95, speed: 3.3, radius: 0.3, damage: 8, attackCd: 0.9, reach: 0.15, aggro: 6.5, reward: 0, color: 0x6b5b7b, scale: 0.68, model: 'sheep', armor: L, bonusRanged: 8, slowHit: 1 },
   { name: '輕型遠程蛛網兵', team: P, hp: 70, speed: 2.4, radius: 0.29, damage: 5, attackCd: 1.4, reach: 0.1, aggro: 7, reward: 0, color: 0x6b5b7b, scale: 0.66, model: 'sheep', armor: L, range: 5.5, proj: 'web', slowHit: 2.5 },
-  { name: '重型遠程弩砲', team: P, hp: 200, speed: 1.1, radius: 0.5, damage: 26, attackCd: 3.0, reach: 0.1, aggro: 11, reward: 0, color: 0x6b5b7b, scale: 1.1, model: 'sheep', armor: H, meleeDef: 0, rangedDef: 10, range: 10, bonusHeavy: 12, bonusSiege: 30, proj: 'spike', wheeled: true, upgAtk: 0, slowHit: 1.5 },
+  { name: '重型遠程弩砲', team: P, hp: 200, speed: 1.1, radius: 0.5, damage: 26, attackCd: 3.0, reach: 0.1, aggro: 11, reward: 0, color: 0x6b5b7b, scale: 1.1, model: 'sheep', armor: H, meleeDef: 0, rangedDef: 10, range: 10, bonusHeavy: 12, bonusSiege: 30, proj: 'spike', wheeled: true, upgAtk: 0, slowHit: 1.5, skill: { type: 'pierce', width: 0.45 } },
   { name: '重型鏈錘兵', team: P, hp: 190, speed: 1.7, radius: 0.42, damage: 11, attackCd: 1.9, reach: 0.4, aggro: 4.5, reward: 0, color: 0x6b5b7b, scale: 0.92, model: 'sheep', armor: H, meleeDef: 3, rangedDef: 3, upgAtk: 2, skill: { type: 'cleave', radius: 1.1 }, slowHit: 1.5 },
   // ---- 樹人族（樹人族軍營輪流訓練）。種族特色：血厚，但移動、攻擊速度慢（全部重甲）。還沒有圖，暫用羊人的模型
   // 重型巨盾兵：只有塔盾，幾乎不打人，擋箭保護周圍隊友　重型標槍兵：重型遠程，一下很重　重型斧頭車：近戰攻城器　重型巨棒兵（特殊）：一棒很重

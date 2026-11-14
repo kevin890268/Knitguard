@@ -75,13 +75,16 @@ renderer.setWorld(world);
 const army = new ArmyControl(() => world, renderer, MAX_UNITS);
 // 沒選部隊時 WASD 移動鏡頭；選了部隊 A＝攻擊移動、S＝停止
 renderer.cam.allowWasd = () => army.sel.length === 0;
+// 選了部隊：右鍵按住是預覽站位、拖曳轉向（不拖鏡頭）；沒選部隊時右鍵拖曳照舊移動鏡頭
+renderer.cam.allowRightDrag = () => army.sel.length === 0 || tool !== 'select';
 $('help').innerHTML =
   '<b>部隊</b>　左鍵點選／框選　Shift 加選　雙擊選同兵種　Ctrl+A 全選<br>' +
   '右鍵：移動／攻擊　Shift+右鍵：排路線<br>' +
+  '右鍵按住：看站位（綠圈）　按住繞著拖：轉陣型方向（A 之後左鍵按住＝紅圈，攻擊移動）<br>' +
   'A 攻擊移動　R 巡邏　S 停止　H 堅守<br>' +
   'Ctrl+數字 編隊　數字 選隊（按兩下跳過去）<br>' +
   '<b>建造</b>　Z 牆　T 箭塔　B 羊圈　X 拆除　U 升級<br>' +
-  (USE_3D ? '方向鍵（沒選部隊時 WASD）移動　右鍵拖曳旋轉　Q/E 轉向　滾輪縮放<br>' : '方向鍵、右鍵拖曳（沒選部隊時 WASD）平移　滾輪縮放<br>') +
+  (USE_3D ? '方向鍵（沒選部隊時 WASD）移動　右鍵拖曳旋轉　Q/E 轉向　滾輪縮放<br>' : '方向鍵（沒選部隊時 WASD、右鍵拖曳）平移　滾輪縮放<br>') +
   '空白：下一波　P：暫停　Esc：取消／暫停選單';
 
 let tool: ToolId = 'select';
@@ -94,17 +97,17 @@ let lastSpray = 0;
 /** DEMO：撐過 5 波就贏。網址加 ?dev 顯示開發者沙盒和除錯工具（或按 ` 鍵） */
 const DEV = new URLSearchParams(location.search).has('dev');
 /**
- * 兵種 DEMO（預設／?units）：十族（羊、刺刺、狗、豬人、牛人、鹿、狼人、魚人、蛛人、樹人）每種兵各 6 隻擺在城堡旁邊，防守 1 波大的。
- * 排法：近戰最外圈、短程第二圈、輔助第三圈、長程最內圈。
- * 我方先不放攻城武器（有輪子的：投石車、弩砲、衝撞車、斧頭車、水砲…），敵人的照舊。
+ * 兵種 DEMO（預設／?units）：十族（羊、刺刺、狗、豬人、牛人、鹿、狼人、魚人、蛛人、樹人）每種兵各 10 隻擺在城堡旁邊，防守 1 波大的。
+ * 排法：貼著市鎮中心擠成一團（遠程和攻城器在最內圈、近戰在最外圈），每隻面朝外。
+ * 我方每種兵各 10 隻（包含攻城武器：投石車、弩砲、衝撞車…）。
  */
 const DEMO = {
-  waves: [1170], // 只有一波，原本第一波 900 隻 × 1.3
+  waves: [3000], // 只有一波 3000 隻
   // 屍潮組成用預設（data.ts 的 WAVE_MIX：骨頭族為主，混一些毛球族）
   // 地圖 256×256、敵人從上方邊緣走到最下方的市鎮中心要 100–160 秒 → 開場 3 秒就出第一波（約 2 分鐘後抵達）
   firstWave: 3,
   interval: 45,
-  perKind: 6,
+  perKind: 10,
   rings: [
     { r: 6.2, kinds: [UK.Lancer, UK.Spineball, UK.DogCav, UK.PigHammer, UK.PigGiant, UK.BullAxe, UK.BullGreataxe, UK.DeerSaber, UK.WolfClaw, UK.WolfBerserker, UK.FishSpear, UK.FishAnchor, UK.SpiderDrop, UK.SpiderFlail, UK.TreantShield, UK.TreantClub] },
     { r: 4.9, kinds: [UK.Javelin, UK.Barker, UK.BullRam, UK.DeerRam, UK.WolfSlinger, UK.FishHarpoon, UK.SpiderWeb, UK.TreantJavelin, UK.TreantAxeCart] },
@@ -217,21 +220,27 @@ function setupWorld(w: World): void {
   w.waveTimer = DEMO.firstWave;
   w.waveInterval = DEMO.interval;
   const cx = w.map.baseX + 1.5, cy = w.map.baseY + 1.5;
-  for (const ring0 of DEMO.rings) {
-    const ring = { r: ring0.r, kinds: ring0.kinds.filter((k) => !UNIT_KINDS[k].wheeled) }; // 先不放攻城武器
-    const n = ring.kinds.length * DEMO.perKind;
-    for (let s = 0; s < n; s++) {
-      const kind = ring.kinds[s % ring.kinds.length]; // 不同兵種交錯排
-      const a = (s / n) * Math.PI * 2;
-      // 落在石頭、水、樹上就往外挪一點
-      let r = ring.r, x = cx, y = cy;
-      for (let tries = 0; tries < 6; tries++, r += 0.5) {
-        x = cx + Math.cos(a) * r; y = cy + Math.sin(a) * r;
-        if (!w.isSolid(Math.floor(x), Math.floor(y))) break;
-      }
-      w.spawnUnitAt(kind, x, y);
+  // 全部我方貼著市鎮中心擠成一團（六角形最密排法，從市鎮中心外圍一圈一圈往外塞）：
+  // 最內圈是遠程和攻城器、往外是輔助、短程，最外圈是近戰；每隻面朝外
+  const kinds: number[] = [];
+  for (const ring of [...DEMO.rings].reverse()) for (const kind of ring.kinds) for (let s = 0; s < DEMO.perKind; s++) kinds.push(kind);
+  const step = 0.62, half = 1.5 + 0.35; // 點和點的間距；市鎮中心佔 3×3，外面留一點點
+  const pts: [number, number, number][] = [];
+  for (let row = -40; row <= 40; row++) { // 整片掃完再照距離排（81×81 個點，很快）
+    const y = cy + row * step * 0.866;
+    for (let col = -40; col <= 40; col++) {
+      const x = cx + (col + (row & 1 ? 0.5 : 0)) * step;
+      if (Math.abs(x - cx) < half && Math.abs(y - cy) < half) continue; // 市鎮中心上面
+      if (w.isSolid(Math.floor(x), Math.floor(y))) continue;
+      pts.push([x, y, Math.hypot(x - cx, y - cy)]);
     }
   }
+  pts.sort((p, q) => p[2] - q[2]);
+  kinds.forEach((kind, k) => {
+    const [x, y] = pts[k];
+    const i = w.spawnUnitAt(kind, x, y);
+    if (i >= 0) w.units.face[i] = w.units.endFace[i] = Math.atan2(x - cx, y - cy); // 面朝外
+  });
 }
 setupWorld(world);
 renderer.setWorld(world); // 展示區清過地形，重建樹和石頭
@@ -253,6 +262,7 @@ const loop = new GameLoop(
   (alpha, frameDt) => {
     renderer.cam.update(frameDt);
     army.prune();
+    army.holdUpdate(); // 右鍵按住時的站位預覽
     updateGhost();
     renderer.render(alpha);
     if ((world.gameOver || world.victory) && $('over').style.display !== 'flex') {
@@ -425,6 +435,7 @@ const canvas = renderer.canvas;
 /** 左鍵按下的位置（框選用）；右鍵按下的位置（分辨「點一下下指令」和「拖曳平移」） */
 let boxStart: { x: number; y: number } | null = null;
 let rightDown: { x: number; y: number } | null = null;
+let leftDown: { x: number; y: number } | null = null; // A 攻擊移動：左鍵按下的位置（按住拖曳轉方向用）
 let lastClick = { t: 0, unit: -1 };
 
 canvas.addEventListener('pointermove', (e) => {
@@ -439,10 +450,20 @@ canvas.addEventListener('pointermove', (e) => {
   if (held) act(false);
 });
 canvas.addEventListener('pointerleave', () => { mouse.in = false; });
+canvas.addEventListener('pointermove', (e) => { if (army.holding) army.holdMove(e.clientX, e.clientY); }); // 右鍵按住拖曳：轉陣型
 canvas.addEventListener('pointerdown', (e) => {
-  if (e.button === 2) { rightDown = { x: e.clientX, y: e.clientY }; return; }
+  if (e.button === 2) {
+    rightDown = { x: e.clientX, y: e.clientY };
+    if (tool === 'select') army.holdStart(e.clientX, e.clientY); // 有選部隊：開始預覽站位
+    return;
+  }
   if (e.button !== 0) return;
-  if (army.mode) { army.modeClick(e.clientX, e.clientY, e.shiftKey); return; }
+  if (army.mode) {
+    // A 攻擊移動：左鍵按住和右鍵一樣可以看站位（紅圈）、繞著拖轉方向；巡邏照舊點一下
+    if (army.mode === 'attackMove') { leftDown = { x: e.clientX, y: e.clientY }; if (army.holdStart(e.clientX, e.clientY, true)) return; leftDown = null; }
+    army.modeClick(e.clientX, e.clientY, e.shiftKey);
+    return;
+  }
   if (tool === 'select') { boxStart = { x: e.clientX, y: e.clientY }; return; }
   held = true;
   lastPaintTile = -1;
@@ -452,7 +473,19 @@ addEventListener('pointerup', (e) => {
   if (e.button === 2 && rightDown) {
     const moved = Math.hypot(e.clientX - rightDown.x, e.clientY - rightDown.y);
     rightDown = null;
+    // 右鍵按住拖過：照預覽的站位和朝向移動
+    if (army.holding && moved >= 6) { army.holdEnd(e.shiftKey); return; }
+    army.holdCancel(); // 沒拖：取消預覽，交給一般右鍵（點敵人＝攻擊、點地面＝移動）
     if (moved < 6 && e.target === canvas) rightClick(e.clientX, e.clientY, e.shiftKey);
+    return;
+  }
+  if (e.button === 0 && leftDown) {
+    // A 攻擊移動按住：拖過＝照預覽的站位和方向攻擊移動；沒拖＝和以前一樣點一下（點在敵人上＝攻擊）
+    const moved = Math.hypot(e.clientX - leftDown.x, e.clientY - leftDown.y);
+    leftDown = null;
+    if (army.holding && moved >= 6) { army.holdEnd(e.shiftKey); return; }
+    army.holdCancel();
+    army.modeClick(e.clientX, e.clientY, e.shiftKey);
     return;
   }
   if (e.button !== 0) return;
@@ -624,6 +657,8 @@ addEventListener('keydown', (e) => {
 $('overBtn').onclick = () => newWorld();
 
 function updatePanels(): void {
+  const sec = Math.floor(world.time), mm = Math.floor(sec / 60), ss = sec % 60;
+  $('hClock').textContent = (mm >= 60 ? `${Math.floor(mm / 60)}:${String(mm % 60).padStart(2, '0')}` : String(mm).padStart(2, '0')) + ':' + String(ss).padStart(2, '0');
   $('hGold').textContent = String(Math.floor(world.gold));
   $('hBase').textContent = `${Math.ceil(world.base.hp)}/${world.base.maxHp}`;
   $('hWave').textContent = world.victoryWave ? `${world.wave} / ${world.victoryWave}` : String(world.wave);

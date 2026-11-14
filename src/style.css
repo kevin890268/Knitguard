@@ -20,6 +20,9 @@ html, body { margin: 0; height: 100%; overflow: hidden; background: #f3e9dc; col
 #hud { position: fixed; top: 10px; left: 50%; transform: translateX(-50%); padding: 6px 16px;
   font-size: 16px; display: flex; gap: 14px; align-items: center; white-space: nowrap; }
 #hud b { color: #b0455a; }
+#clock { position: fixed; top: 10px; right: 10px; padding: 6px 14px; background: var(--cream); border: 2px dashed var(--stitch); border-radius: 14px;
+  font-size: 15px; color: var(--ink); font-variant-numeric: tabular-nums; z-index: 5; }
+#clock b { color: #b0455a; }
 #hNext { font-size: 13px; opacity: .7; }
 
 #stats { position: fixed; top: 10px; left: 10px; font: 12px/1.5 Consolas, monospace; white-space: pre;
@@ -169,4 +172,4 @@ body.demo #stats, body.demo #cmdCard .cmd.debug, body.demo #funcStack .fn.debug 
 @media (max-width: 1250px) { #help { display: none; } }
 
 /* 單位圖鑑（預設 DEMO）：只看單位，操作介面全部藏起來 */
-body.gallery #hud, body.gallery #stats, body.gallery #funcStack, body.gallery #bottomBar, body.gallery #help, body.gallery #dragBox { display: none !important; }
+body.gallery #hud, body.gallery #clock, body.gallery #stats, body.gallery #funcStack, body.gallery #bottomBar, body.gallery #help, body.gallery #dragBox { display: none !important; }

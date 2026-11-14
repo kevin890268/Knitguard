@@ -68,6 +68,8 @@ export class Units {
   readonly grp: Int32Array;
   /** 第幾代：索引被重複使用時 +1（選取、編隊用它分辨是不是同一隻） */
   readonly gen: Uint32Array;
+  /** 走到目的地後要面向哪裡（弧度，和 face 一樣；NaN＝不轉）：移動指令的陣型朝向 */
+  readonly endFace: Float32Array;
 
   private free: number[] = [];
 
@@ -79,6 +81,7 @@ export class Units {
     this.hitT = f(); this.homeX = f(); this.homeY = f();
     this.buff = f(); this.slowT = f(); this.bleedT = f(); this.bleedDps = f(); this.curlT = f(); this.skillT = f();
     this.ordX = f(); this.ordY = f(); this.patX = f(); this.patY = f(); this.spdCap = f(); this.waitT = f(); this.bestD = f();
+    this.endFace = f();
     this.order = new Uint8Array(cap);
     this.hold = new Uint8Array(cap);
     this.ordT = new Int32Array(cap);
@@ -114,6 +117,7 @@ export class Units {
     this.order[i] = this.hold[i] = 0;
     this.ordT[i] = this.path[i] = this.path2[i] = this.grp[i] = -1;
     this.spdCap[i] = this.waitT[i] = this.bestD[i] = 0;
+    this.endFace[i] = NaN;
     this.gen[i]++;
     this.kind[i] = kind;
     this.team[i] = k.team;

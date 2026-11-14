@@ -71,6 +71,8 @@ export class GameMap {
     if (layout === 'south') {
       this.addDeposits(rng, cx, cy);
       this.ensureEntries(rng, cx, cy);
+      this.openPinches();
+      this.fillPockets(cx, cy);
     }
     this.depositOf = new Int32Array(w * h).fill(-1);
     this.groupDeposits();
@@ -130,6 +132,33 @@ export class GameMap {
       this.carveLine(ex, ey, mx, my, 1.4, rng);
       this.carveLine(mx, my, cx, cy, 1.4, rng);
     }
+  }
+
+  /**
+   * 斜角夾縫：2×2 裡兩格擋路只在斜角相碰、另外兩格是草地 → 單位被擠到那個角落會卡住。
+   * 把其中一格樹或石頭清成草地（礦和果樹聚落不動），變成正常的通道。重複到沒有為止。
+   */
+  private openPinches(): void {
+    const { w, h, tiles, res } = this;
+    const solid = (x: number, y: number) => tiles[y * w + x] !== Tile.Grass;
+    for (let pass = 0; pass < 4; pass++) {
+      let changed = 0;
+      for (let y = 0; y + 1 < h; y++) for (let x = 0; x + 1 < w; x++) {
+        const a = solid(x, y), b = solid(x + 1, y), c = solid(x, y + 1), d = solid(x + 1, y + 1);
+        let pick = -1;
+        if (a && d && !b && !c) pick = res[y * w + x] ? (y + 1) * w + x + 1 : y * w + x;
+        else if (b && c && !a && !d) pick = res[y * w + x + 1] ? (y + 1) * w + x : y * w + x + 1;
+        if (pick < 0 || res[pick] || tiles[pick] === Tile.Water) continue; // 礦、果樹、水不動
+        tiles[pick] = Tile.Grass; changed++;
+      }
+      if (!changed) break;
+    }
+  }
+
+  /** 從市鎮中心走不到的草地（被樹、石頭、水圍住的小空洞）全部填成樹：單位不會被擠進去出不來 */
+  private fillPockets(cx: number, cy: number): void {
+    const seen = this.reachable(cx, cy), { tiles, res } = this;
+    for (let i = 0; i < tiles.length; i++) if (tiles[i] === Tile.Grass && !seen[i]) { tiles[i] = Tile.Tree; res[i] = Res.None; }
   }
 
   /** 從 (cx, cy) 出發走得到的草地格（4 方向） */

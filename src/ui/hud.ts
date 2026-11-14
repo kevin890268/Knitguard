@@ -45,11 +45,11 @@ function skillText(k: UnitKind): string {
   switch (s.type) {
     case 'horn': return `📯 號角：周圍 ${s.radius} 格的我方攻擊 +${s.atk}`;
     case 'curl': return `🦔 縮球：敵人靠近自動縮成刺球，防禦 +${s.def}、近戰反傷 ${s.reflect}、移動 −${Math.round(s.slow * 100)}%`;
-    case 'pierce': return '🎯 貫穿：射出的刺穿過一整排敵人';
+    case 'pierce': return '🎯 穿心：射出的刺穿過一整排敵人，線上每一隻都受傷';
     case 'trap': return `🪤 陷阱：每 ${s.cd} 秒放一個地刺（最多 ${s.max} 個），踩到受 ${s.dmg} 傷害並變慢`;
     case 'bark': return `🐕 吠叫：周圍 ${s.radius} 格的敵人移動、攻擊變慢`;
     case 'heal': return `💚 治療：每 ${s.cd} 秒治療附近最需要的隊友 ${s.amount} 血`;
-    case 'splash': return `💦 水花：水彈落地濺開，周圍 ${s.radius} 格的敵人都受傷`;
+    case 'splash': return k.proj === 'water' ? `💦 水花：水彈落地濺開，周圍 ${s.radius} 格的敵人都受傷` : `🪨 落石：石頭落地砸開，周圍 ${s.radius} 格的敵人都受傷`;
     case 'anchor': return '⚓ 船錨：打中的敵人會被拖慢（移動、攻擊變慢）';
     case 'guard': return `🛡️ 盾牆：周圍 ${s.radius} 格的隊友被遠程打時防禦 +${s.def}`;
     case 'cleave': return `⛓️ 鏈錘橫掃：連目標周圍 ${s.radius} 格的敵人一起打`;

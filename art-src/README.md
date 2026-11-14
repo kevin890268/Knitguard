@@ -8,7 +8,7 @@
 | 🐑 羊族 | 長槍兵 | `sheep/lancer/` | ✅ | `lancer/` |
 | 🐑 羊族 | 弓箭手 | `sheep/archer/` | ✅ | `archer/` |
 | 🐑 羊族 | 投石車 | `sheep/catapult/` | ✅ | `catapult/` |
-| 🐑 羊族 | 號角手 | — | ❌ 還沒畫（暫用村民的圖） | `horn/` |
+| 🐑 羊族 | 號角手 | `sheep/horn/` | ✅ 2026-11-15。用第二排（第一張是放大的主視角，大小不一樣，不用）：左前、左側、左後、背面、右後、右側、右前；沒有正面，用左前代替（`tools/split-touching.ps1`） | `horn/` |
 | 🦔 刺刺族 | 刺球衛 | `spiky/ball-guard/` | ✅（含縮球形態） | `spineball/`、`spineball_curl/` |
 | 🦔 刺刺族 | 豪豬標槍手 | `spiky/javelinier/` | ✅ | `javelin/` |
 | 🦔 刺刺族 | 尖刺弩砲 | `spiky/ballista/` | ✅ | `ballista/` |

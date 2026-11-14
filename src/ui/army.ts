@@ -6,6 +6,8 @@ import type { World } from '../sim/world';
 interface ArmyView {
   unitSel: Uint8Array | null;
   pings: { x: number; y: number; t: number; color: string }[];
+  /** 按住時的陣型預覽（移動＝綠色圈圈、攻擊移動＝紅色圈圈） */
+  formPreview: { slots: Float32Array; ax: number; ay: number; fx: number; fy: number; attack: boolean } | null;
   readonly canvas: HTMLCanvasElement;
   readonly cam: {
     pick(cx: number, cy: number): { x: number; z: number } | null;
@@ -179,9 +181,9 @@ export class ArmyControl {
   }
 
   // ---------------------------------------------------------------- 指令
-  command(type: CommandType, x = 0, y = 0, queue = false, target = -1): void {
+  command(type: CommandType, x = 0, y = 0, queue = false, target = -1, facing?: [number, number]): void {
     if (!this.sel.length) return;
-    this.world.command(this.sel, type, x, y, { queue, form: this.form, target });
+    this.world.command(this.sel, type, x, y, { queue, form: this.form, target, facing });
     if (type === 'move' || type === 'attackMove' || type === 'patrol') {
       this.view.pings.push({ x, y, t: 0.6, color: type === 'move' ? PING.move : type === 'patrol' ? PING.patrol : PING.attack });
     } else if (type === 'attack') {
@@ -200,6 +202,52 @@ export class ArmyControl {
     if (p) this.command('move', p.x, p.z, shift);
     return true;
   }
+
+  // ---------------------------------------------------------------- 右鍵按住：預覽站位、拖曳轉向（參考要戰便戰）
+  /**
+   * 右鍵按住的狀態：anchor＝按下去的地面位置（陣型中心）；拖到離 anchor 夠遠時，朝向＝從 anchor 指向滑鼠。
+   * 畫面上用 view.formPreview 畫綠色圈圈；放開時照這個朝向移動過去。
+   */
+  private hold: { ax: number; ay: number; facing?: [number, number]; t0: number; attack: boolean } | null = null;
+  /** 右鍵按下：有選部隊、點的不是敵人 → 開始預覽；回傳是否開始了 */
+  holdStart(cx: number, cy: number, attack = false): boolean {
+    if ((this.mode && !attack) || !this.sel.length) return false;
+    const t = this.pickUnit(cx, cy);
+    if (t >= 0 && this.world.units.team[t] !== Team.Player) return false; // 點在敵人上＝攻擊，不轉陣型
+    const p = this.view.cam.pick(cx, cy);
+    if (!p) return false;
+    this.hold = { ax: p.x, ay: p.z, t0: performance.now(), attack };
+    return true;
+  }
+  /** 右鍵按著移動滑鼠：拖離中心 0.6 格以上就轉向滑鼠的方向 */
+  holdMove(cx: number, cy: number): void {
+    const h = this.hold;
+    if (!h) return;
+    const p = this.view.cam.pick(cx, cy);
+    if (!p) return;
+    const dx = p.x - h.ax, dy = p.z - h.ay, d = Math.hypot(dx, dy);
+    if (d > 0.6) h.facing = [dx / d, dy / d];
+  }
+  /** 每個畫面更新預覽（按住超過 0.15 秒、或已經在轉向才顯示，快速點一下不會閃圈圈） */
+  holdUpdate(): void {
+    const h = this.hold;
+    if (!h || (!h.facing && performance.now() - h.t0 < 150)) { this.view.formPreview = null; return; }
+    const pv = this.world.previewFormation(this.sel, h.ax, h.ay, this.form, h.facing);
+    this.view.formPreview = { slots: pv.slots, ax: h.ax, ay: h.ay, fx: pv.fx, fy: pv.fy, attack: h.attack };
+  }
+  /** 右鍵放開：照預覽的位置和朝向移動（沒有轉向＝一般的右鍵移動）。回傳有沒有處理 */
+  holdEnd(shift: boolean): boolean {
+    const h = this.hold;
+    this.hold = null;
+    this.view.formPreview = null;
+    if (!h) return false;
+    if (h.attack && !shift) this.mode = null; // A 攻擊移動：下完就結束（Shift 按著可以連續下）
+    this.command(h.attack ? 'attackMove' : 'move', h.ax, h.ay, shift, -1, h.facing);
+    return true;
+  }
+  /** 取消預覽（不下指令） */
+  holdCancel(): void { this.hold = null; this.view.formPreview = null; }
+  get holding(): boolean { return this.hold !== null; }
 
   /** 按了 A／R 之後的左鍵：攻擊移動（點在敵人上＝攻擊）或巡邏 */
   modeClick(cx: number, cy: number, shift: boolean): void {

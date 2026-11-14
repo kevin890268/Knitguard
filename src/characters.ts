@@ -16,7 +16,6 @@ const ROMAN = ['Ⅰ', 'Ⅱ', 'Ⅲ', 'Ⅳ'];
 
 /** 還沒畫、暫時借別人圖的角色：卡片上標出來，免得以為就是這個樣子 */
 const PLACEHOLDER: Record<string, string> = {
-  horn: '還沒畫，暫用村民的圖',
 };
 
 const slotOf = (kind: number) => ART_SLOTS.find((s) => s.target.type === 'unit' && s.target.kind === kind);

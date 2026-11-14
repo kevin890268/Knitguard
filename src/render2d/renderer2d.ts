@@ -487,8 +487,8 @@ export class Renderer2D {
       // 真的在走路才跳：速度要夠快；我方還要有指令、在追敵人或離崗位夠遠（站著被推擠不算）
       const moving = u.vx[i] * u.vx[i] + u.vy[i] * u.vy[i] > 0.4 && (u.team[i] !== 0 || u.order[i] !== 0 || u.target[i] >= 0 ||
         (u.homeX[i] - u.x[i]) ** 2 + (u.homeY[i] - u.y[i]) ** 2 > 0.8);
-      // 走路一跳一跳；有輪子的器具用滑的。敵人跳一半，大型敵人（半徑 ≥ 0.45）只跳四分之一
-      const bobMul = u.team[i] === Team.Player ? 1 : kind.radius >= 0.45 ? 0.25 : 0.5;
+      // 走路一跳一跳；有輪子的器具用滑的。我方和敵人都跳一半，大型敵人（半徑 ≥ 0.45）只跳四分之一
+      const bobMul = u.team[i] === Team.Player ? 0.5 : kind.radius >= 0.45 ? 0.25 : 0.5;
       const walkBob = moving && !kind.wheeled ? Math.abs(Math.sin(t * 12 + i)) * 0.12 * kind.scale * bobMul : 0;
       // 會飛的：浮在空中慢慢上下飄（影子留在地上）
       // 會跳的：走路時一跳一跳（比一般走路的跳動高很多，越過前面的隊伍）
@@ -704,6 +704,31 @@ export class Renderer2D {
 
   /** 地面上的標記：建造預覽、選取框、射程圈 */
   private drawGroundMarks(g: CanvasRenderingContext2D): void {
+    const fp = this.formPreview;
+    if (fp) {
+      // 綠色圈圈＝每隻要站的位置；中間一支箭頭＝面向
+      const R = 0.3 * PX_PER_UNIT;
+      // 移動＝綠、攻擊移動＝紅
+      g.fillStyle = fp.attack ? 'rgba(240, 100, 100, 0.28)' : 'rgba(110, 230, 110, 0.28)';
+      g.strokeStyle = fp.attack ? 'rgba(230, 60, 60, 0.95)' : 'rgba(80, 220, 80, 0.95)';
+      g.lineWidth = 2;
+      g.beginPath();
+      for (let k = 0; k < fp.slots.length; k += 2) {
+        const [sx, sy] = toScreen(fp.slots[k], fp.slots[k + 1]);
+        g.moveTo(sx + R, sy);
+        g.ellipse(sx, sy, R, R * 0.5, 0, 0, Math.PI * 2);
+      }
+      g.fill();
+      g.stroke();
+      const [x0, y0] = toScreen(fp.ax, fp.ay), [x1, y1] = toScreen(fp.ax + fp.fx * 2, fp.ay + fp.fy * 2);
+      const ang = Math.atan2(y1 - y0, x1 - x0);
+      g.strokeStyle = fp.attack ? 'rgba(210, 50, 50, 0.95)' : 'rgba(60, 200, 60, 0.95)';
+      g.lineWidth = 4;
+      g.beginPath();
+      g.moveTo(x0, y0); g.lineTo(x1, y1);
+      g.moveTo(x1 - 12 * Math.cos(ang - 0.5), y1 - 12 * Math.sin(ang - 0.5)); g.lineTo(x1, y1); g.lineTo(x1 - 12 * Math.cos(ang + 0.5), y1 - 12 * Math.sin(ang + 0.5));
+      g.stroke();
+    }
     const gh = this.ghost;
     if (gh.visible) {
       this.diamond(g, gh.tx, gh.ty, gh.size, gh.h);
@@ -731,6 +756,9 @@ export class Renderer2D {
       g.stroke();
     }
   }
+
+  /** 右鍵按住時的陣型預覽：每隻要站的位置（綠色圈圈）＋中心和朝向（箭頭）；null＝沒有 */
+  formPreview: { slots: Float32Array; ax: number; ay: number; fx: number; fy: number; attack: boolean } | null = null;
 
   /** 選到的資源聚落（−1＝沒有）：地上每一格畫淡黃色菱形（top＝false），整片外框描亮（top＝true，畫在物件上面） */
   selectedDeposit = -1;
@@ -943,13 +971,31 @@ export class Renderer2D {
 
   /** 一閃而過的範圍效果：吼叫（黃）、治療（綠）、號角（紅）、陷阱觸發（棕） */
   private drawFx(g: CanvasRenderingContext2D): void {
-    const color = { bark: '255,200,60', heal: '90,210,110', horn: '226,75,91', trap: '160,100,50', splash: '80,170,240' };
+    const color = { bark: '255,200,60', heal: '90,210,110', horn: '226,75,91', trap: '160,100,50', splash: '80,170,240', blast: '150,110,70', pierce: '230,40,50' };
     for (const f of this.world.fx) {
       const [sx, sy] = toScreen(f.x, f.y);
       const a = Math.min(1, f.t / 0.3);
       g.strokeStyle = `rgba(${color[f.kind]},${0.7 * a})`;
       g.lineWidth = f.kind === 'horn' ? 1.5 : 2.5;
       g.beginPath(); g.ellipse(sx, sy, f.r * PX_PER_UNIT, f.r * PX_PER_UNIT * 0.5, 0, 0, Math.PI * 2); g.stroke();
+      if (f.kind === 'blast') {
+        // 投石車：落點揚起一圈塵土＋幾顆往外飛的碎石
+        const k = 1 - f.t / 0.35;
+        g.fillStyle = `rgba(170,140,100,${0.35 * a})`;
+        g.beginPath(); g.ellipse(sx, sy, f.r * PX_PER_UNIT * (0.6 + 0.4 * k), f.r * PX_PER_UNIT * 0.5 * (0.6 + 0.4 * k), 0, 0, Math.PI * 2); g.fill();
+        g.fillStyle = `rgba(110,90,70,${a})`;
+        for (let q = 0; q < 6; q++) {
+          const ang = q * 1.047 + f.x * 3, rr = f.r * PX_PER_UNIT * (0.3 + 0.8 * k);
+          g.fillRect(sx + Math.cos(ang) * rr - 2, sy + Math.sin(ang) * rr * 0.5 - 2 - 14 * Math.sin(k * Math.PI), 4, 4);
+        }
+      }
+      if (f.kind === 'pierce') {
+        // 弩砲穿心：被射穿的身上一團紅色的十字光
+        g.strokeStyle = `rgba(255,80,80,${a})`;
+        g.lineWidth = 3;
+        const h = sy - 18;
+        g.beginPath(); g.moveTo(sx - 8, h); g.lineTo(sx + 8, h); g.moveTo(sx, h - 8); g.lineTo(sx, h + 8); g.stroke();
+      }
       if (f.kind === 'heal') {
         g.fillStyle = `rgba(${color.heal},${a})`;
         g.fillRect(sx - 2, sy - 30, 4, 12); g.fillRect(sx - 6, sy - 26, 12, 4);

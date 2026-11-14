@@ -64,7 +64,7 @@ export function formationSlots(
     if (!g.length) continue;
     let diam = 0;
     for (const k of g) diam = Math.max(diam, rads[ids[k]] * 2);
-    const sp = (diam + 0.3) * spreadK;
+    const sp = (diam + 0.1) * spreadK; // 站緊一點：空隙比小怪的身體窄，敵人不能從中間穿過
     // 先依前後位置排序 → 本來就在前面的單位排前排
     g.sort((a, b) => ((xs[ids[b]] - cx) * fx + (ys[ids[b]] - cy) * fy) - ((xs[ids[a]] - cx) * fx + (ys[ids[a]] - cy) * fy));
     for (let s = 0; s < g.length; s += cols) rows.push({ ks: g.slice(s, s + cols), sp });
