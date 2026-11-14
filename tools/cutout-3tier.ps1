@@ -1,5 +1,5 @@
 param([string]$Root, [string]$Only = '')
-# 3-tier enemy sheets (art-src/enemies/<folder>/, no labels): 3 rows (tiers), each row = a big 45-degree hero view
+# Tier enemy sheets (art-src/enemies/<folder>/, no labels): 3 or 4 rows (tiers), each row = a big 45-degree hero view
 # + 8 small views. Two layouts (checked by eye, faces on screen):
 #   B (zombie, mummy): front-left, left, back-left, back, back-right, right, front-right, front  (a full turn)
 #   A (the others):    front-left, left, back-left, (between back-left and back: unused), back, back-right, right, front
@@ -10,12 +10,14 @@ param([string]$Root, [string]$Only = '')
 $MAPB = @('', 'frontLeft45', 'sideLeft', 'backLeft45', 'back', 'back45', 'side', 'front45', 'front')
 $MAPA = @('', 'frontLeft45', 'sideLeft', 'backLeft45', '', 'back', 'back45', 'side', 'front')
 $jobs = @(
-  # folder, sprite id, white background (1/0), [erode: px to break touching figures apart, default 0], [layout 'A'/'B', default A]
+  # folder, sprite id, white background (1/0), [erode: px to break touching figures apart, default 0], [layout 'A'/'B', default A], [rows, default 3]
   @('ice-slime','ice_slime',0), @('ice-queen','ice_queen',0), @('snow-sprite','snow_sprite',0),
   @('zombie','zombie',0,0,'B'), @('fire-sprite','fire_sprite',0), @('lizard-shaman','lizard_shaman',0),
   @('bone-lizard','bone_lizard',0), @('mummy','mummy',0,0,'B'), @('lizard-crossbow','lizard_crossbow',0),
   @('snow-beast','snow_beast',0), @('frost-troll','frost_troll',1), @('rainbow-slime','rainbow_slime',0),
-  @('lizard-warrior','lizard_warrior',0,8), @('lizard-heavy','lizard_heavy',0,6), @('snowball','snowball',0)
+  @('lizard-warrior','lizard_warrior',0,8), @('lizard-heavy','lizard_heavy',0,6), @('snowball','snowball',0),
+  # 2026-11-15
+  @('bull-thrower','bull_thrower',0,0,'B'), @('pig-thrower','pig_thrower',0,0,'B'), @('lizard-overlord','lizard_overlord',1,0,'B',4)
 )
 Add-Type -AssemblyName System.Drawing
 if (-not ([System.Management.Automation.PSTypeName]'Tier3Prep').Type) {
@@ -23,7 +25,7 @@ Add-Type -ReferencedAssemblies System.Drawing -TypeDefinition @"
 using System; using System.Collections.Generic; using System.Drawing; using System.Drawing.Imaging; using System.IO; using System.Runtime.InteropServices;
 public static class Tier3Prep {
   // copy the sheet to outp (optionally flood the white background away); return the two row seams "y1,y2"
-  public static string Run(string sheet, string outp, bool flood){
+  public static string Run(string sheet, string outp, bool flood, int rows){
     Bitmap S0; using(var fs=new FileStream(sheet,FileMode.Open,FileAccess.Read)) S0=new Bitmap(fs);
     int W=S0.Width, H=S0.Height; var S=new Bitmap(W,H,PixelFormat.Format32bppArgb); using(var g=Graphics.FromImage(S)) g.DrawImage(S0,0,0,W,H); S0.Dispose();
     var bd=S.LockBits(new Rectangle(0,0,W,H),ImageLockMode.ReadOnly,PixelFormat.Format32bppArgb); var px=new int[W*H]; Marshal.Copy(bd.Scan0,px,0,px.Length); S.UnlockBits(bd); S.Dispose();
@@ -35,9 +37,11 @@ public static class Tier3Prep {
         if(x>0) st.Push(i-1); if(x<W-1) st.Push(i+1); if(y>0) st.Push(i-W); if(y<H-1) st.Push(i+W); } }
     var rowH=new int[H]; for(int i=0;i<W*H;i++) if(((px[i]>>24)&255)>=200) rowH[i/W]++;
     Func<int,int,int> emptiest=(a,b)=>{ int best=a; for(int y=a;y<=b;y++) if(rowH[y]<rowH[best]) best=y; return best; };
-    int s1=emptiest((int)(H*0.25),(int)(H*0.42)), s2=emptiest((int)(H*0.58),(int)(H*0.75));
+    var seams=new List<string>();
+    for(int r=1;r<rows;r++){ double c=(double)r/rows; seams.Add(emptiest((int)(H*(c-0.08)),(int)(H*(c+0.08))).ToString()); }
     var B=new Bitmap(W,H,PixelFormat.Format32bppArgb); var ob=B.LockBits(new Rectangle(0,0,W,H),ImageLockMode.WriteOnly,PixelFormat.Format32bppArgb); Marshal.Copy(px,0,ob.Scan0,px.Length); B.UnlockBits(ob); B.Save(outp,ImageFormat.Png); B.Dispose();
-    return s1+","+s2+","+(H-1);
+    seams.Add((H-1).ToString());
+    return String.Join(",",seams);
   }
 }
 "@
@@ -48,17 +52,22 @@ foreach ($j in $jobs) {
   if ($Only -and $j[0] -ne $Only) { continue }
   $dir = Join-Path $Root "art-src\enemies\$($j[0])"
   $sheet = (Get-ChildItem -File $dir -Filter *.png | Select-Object -First 1).FullName
-  $seams = [Tier3Prep]::Run($sheet, $tmp, [bool]$j[2]).Split(',') | ForEach-Object { [int]$_ }
+  $rows = $(if ($j.Count -gt 5) { [int]$j[5] } else { 3 })
+  $seams = @([Tier3Prep]::Run($sheet, $tmp, [bool]$j[2], $rows).Split(',') | ForEach-Object { [int]$_ })
   $views = Join-Path $dir 'views'; New-Item -ItemType Directory -Force $views | Out-Null
   Get-ChildItem $views -Filter '*.png' -ErrorAction SilentlyContinue | Remove-Item
   $y0 = 0; $report = @()
-  for ($r = 0; $r -lt 3; $r++) {
+  for ($r = 0; $r -lt $rows; $r++) {
     $res = & $split -Sheet $tmp -OutPrefix (Join-Path $views "row$($r + 1)") -Y0 $y0 -Y1 $seams[$r] -Erode $(if ($j.Count -gt 3) { $j[3] } else { 0 }) -MinFrac 0.08
     $report += ($res -split ' ')[0]
     $y0 = $seams[$r] + 1
-    for ($k = 1; $k -le 9; $k++) {
-      $src = Join-Path $views "row$($r + 1)_$k.png"
-      if (Test-Path $src) { Move-Item $src (Join-Path $views "v_$($r * 9 + $k).png") -Force }
+    # the hero is the first (left-most) part; the 8 views are the LAST 8 parts (pieces of a neighbouring row's big
+    # hero view that cross the band end up on the left, so they never push the views out of place)
+    $parts = @(Get-ChildItem $views -Filter "row$($r + 1)_*.png" | Sort-Object { [int]($_.BaseName -replace '^row\d+_', '') })
+    $n = $parts.Count
+    if ($n -ge 9) {
+      Move-Item $parts[0].FullName (Join-Path $views "v_$($r * 9 + 1).png") -Force
+      for ($k = 1; $k -le 8; $k++) { Move-Item $parts[$n - 9 + $k].FullName (Join-Path $views "v_$($r * 9 + 1 + $k).png") -Force }
     }
     Get-ChildItem $views -Filter "row$($r + 1)_*.png" -ErrorAction SilentlyContinue | Remove-Item # extra parts
     $out = Join-Path $Root "public\sprites\$($j[1])_$($r + 1)"; New-Item -ItemType Directory -Force $out | Out-Null
