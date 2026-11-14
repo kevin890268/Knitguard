@@ -243,8 +243,8 @@ export interface MonsterFamily {
 }
 export const MONSTERS: MonsterFamily[] = [
   { id: 'goblin', name: '👺 哥布林', tiers: ['普通哥布林', '野性哥布林', '狂暴哥布林', '魔化哥布林'], hp: 30, damage: 4, speed: 2.0, size: 0.9, color: 0x8aa04a },
-  { id: 'evil_pig', name: '🐗 墮落豬人族', tiers: ['豬人暴徒', '獠牙豬人', '狂暴豬將', '豬魔霸王'], hp: 60, damage: 7, speed: 1.6, size: 1.1, color: 0xd98a8a },
-  { id: 'evil_bull', name: '🐂 壞牛人族', tiers: ['牛人暴徒', '鐵角牛人', '戰牛勇士', '牛魔霸主'], hp: 70, damage: 8, speed: 1.7, size: 1.15, color: 0x8a5a3a },
+  { id: 'evil_pig', name: '🐗 墮落豬人', tiers: ['豬人暴徒', '獠牙豬人', '狂暴豬將', '豬魔霸王'], hp: 60, damage: 7, speed: 1.6, size: 1.1, color: 0xd98a8a, tribe: 'pig' },
+  { id: 'evil_bull', name: '🐂 壞牛人', tiers: ['牛人暴徒', '鐵角牛人', '戰牛勇士', '牛魔霸主'], hp: 70, damage: 8, speed: 1.7, size: 1.15, color: 0x8a5a3a, tribe: 'bull' },
   { id: 'evil_treant', name: '🌳 樹人雜兵', tiers: ['樹精小兵', '森林樹兵', '藤甲樹兵', '古樹守衛'], hp: 75, damage: 6, speed: 1.2, size: 1.05, color: 0x7a9a4a, tribe: 'forest' },
   { id: 'evil_treant2', name: '🌲 壞樹人族', tiers: ['樹靈殘枝', '腐木樹人', '荊棘樹魔', '墮落樹王'], hp: 75, damage: 7, speed: 1.2, size: 1.05, color: 0x6a4a2a, tribe: 'forest' },
   { id: 'dryad', name: '🥀 壞樹妖族', tiers: ['樹妖幼體', '藤蔓樹妖', '荊棘樹妖', '墮落樹姬'], hp: 40, damage: 5, speed: 1.9, size: 0.95, color: 0x9ab06a, tribe: 'forest' },
@@ -278,6 +278,10 @@ export const MONSTERS: MonsterFamily[] = [
   { id: 'zombie', name: '🧟 殭屍', tiers: ['殭屍 Ⅰ', '殭屍 Ⅱ', '殭屍 Ⅲ'], hp: 50, damage: 6, speed: 1.3, size: 1.0, color: 0x8a9a7a, tribe: 'vampire' },
   { id: 'mummy', name: '🧟 木乃伊族', tiers: ['木乃伊 Ⅰ', '木乃伊 Ⅱ', '木乃伊 Ⅲ'], hp: 60, damage: 7, speed: 1.3, size: 1.05, color: 0xc8b890 },
   { id: 'fire_sprite', name: '🔥 火焰精靈', tiers: ['火焰精靈 Ⅰ', '火焰精靈 Ⅱ', '火焰精靈 Ⅲ'], hp: 30, damage: 5, speed: 2.0, size: 0.9, color: 0xf08a2a, tribe: 'fire' },
+  // 2026-11-15：遠程牛頭擲斧兵（壞牛人族）、遠程豬人投擲者（墮落豬人族）、邪龍蜥蜴霸王（蜥蜴族，四階段）
+  { id: 'bull_thrower', name: '🪓 牛頭擲斧兵', tiers: ['牛頭擲斧兵 Ⅰ', '牛頭擲斧兵 Ⅱ', '牛頭擲斧兵 Ⅲ'], hp: 50, damage: 7, speed: 1.6, size: 1.1, color: 0x8a5a3a, tribe: 'bull', range: 5, proj: 'javelin' },
+  { id: 'pig_thrower', name: '🔮 豬人投擲者', tiers: ['豬人投擲者 Ⅰ', '豬人投擲者 Ⅱ', '豬人投擲者 Ⅲ'], hp: 50, damage: 6, speed: 1.5, size: 1.1, color: 0xd98a8a, tribe: 'pig', range: 5, proj: 'pebble' },
+  { id: 'lizard_overlord', name: '🐉 邪龍蜥蜴霸王', tiers: ['邪龍蜥蜴霸王 Ⅰ', '邪龍蜥蜴霸王 Ⅱ', '邪龍蜥蜴霸王 Ⅲ', '邪龍蜥蜴霸王 Ⅳ'], hp: 70, damage: 8, speed: 1.5, size: 1.15, color: 0x5a7a3a, tribe: 'lizard' },
 ];
 /** 合成一個種族的怪物族（圖鑑、對打測試都當同一族） */
 export const MONSTER_TRIBES: Record<string, string> = {
@@ -285,7 +289,9 @@ export const MONSTER_TRIBES: Record<string, string> = {
   fire: '🔥 火焰族', // 火人族、火巨人族、火焰精靈
   vampire: '🦇 吸血鬼族', // 蝙蝠族、吸血鬼族、吸血鬼族（少女）、殭屍
   demon: '😈 惡魔族', // 惡魔、惡魔（第二版）
-  lizard: '🦎 蜥蜴族', // 蜥蜴戰士、蜥蜴重甲戰士、蜥蜴弩手、蜥蜴薩滿、骸骨蜥蜴戰士
+  lizard: '🦎 蜥蜴族', // 蜥蜴戰士、蜥蜴重甲戰士、蜥蜴弩手、蜥蜴薩滿、骸骨蜥蜴戰士、邪龍蜥蜴霸王
+  bull: '🐂 壞牛人族', // 壞牛人、牛頭擲斧兵
+  pig: '🐗 墮落豬人族', // 墮落豬人、豬人投擲者
   slime: '🫧 黏黏族', // 黏黏、冰晶史萊姆、彩虹史萊姆
   snow: '❄️ 雪怪族', // 雪怪、冰雪妖姬、冰雪精靈、冰雪巨獸、冰霜巨魔、雪團
 };
