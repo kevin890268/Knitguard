@@ -33,7 +33,8 @@ const TILE_COLORS: Record<number, [number, number, number]> = {
 const CHUNK = 16; // 地面每 16×16 格預先畫成一張圖
 const DIRS = 8;
 
-interface Prop { x: number; y: number; sprite: Sprite; scale: number; flip: boolean }
+/** 樹、石頭：螢幕位置先算好；要翻轉的直接用翻好的圖（畫的時候不用 save/scale/restore） */
+interface Prop { x: number; y: number; sx: number; sy: number; sprite: Sprite; scale: number }
 
 /**
  * 2D 斜角繪圖層（Canvas 2D）。和 3D 版一樣只「讀」World，不改它。
@@ -69,6 +70,24 @@ export class Renderer2D {
   private treeSprites: Sprite[] = [];
   private rockSprites: Sprite[] = [];
   private props: Prop[] = [];
+  /** 依地面分塊（CHUNK×CHUNK 格）收好的樹和石頭：只看畫面上那幾塊 */
+  private propChunks: Prop[][] = [];
+  /** 翻轉過的樹、石頭圖（每張圖翻一次就好） */
+  private flipped = new Map<Sprite, Sprite>();
+  // 每一張要畫的東西（依遠近排序後畫）：用平行陣列重複使用，不要每張都建物件和函式
+  private dK: number[] = [];
+  private dS: Sprite[] = [];
+  private dX: number[] = [];
+  private dY: number[] = [];
+  private dScale: number[] = [];
+  private dB: (Building | null)[] = [];
+  private dFlip: number[] = [];
+  private dOrder = new Int32Array(4096);
+  private dN = 0;
+  private pushDraw(k: number, s: Sprite, sx: number, sy: number, scale: number, flip: boolean, b: Building | null): void {
+    const n = this.dN++;
+    this.dK[n] = k; this.dS[n] = s; this.dX[n] = sx; this.dY[n] = sy; this.dScale[n] = scale; this.dFlip[n] = flip ? 1 : 0; this.dB[n] = b;
+  }
   private chunks = new Map<number, HTMLCanvasElement>();
   private ghost = { visible: false, tx: 0, ty: 0, size: 1, h: 1, ok: true };
   private dpr = 1;
@@ -83,11 +102,11 @@ export class Renderer2D {
     this.mats = new WoolMaterials(makeKnitTexture());
     this.knitPattern = makeKnitTexture(0.45).image as HTMLCanvasElement;
     this.art = new ArtLibrary(this.mats.knit.image as HTMLCanvasElement);
-    this.bakeUnits();
+    // 兵種的圖用到才處理（ensureKind）：一局只會出現我方和當波那一族，開場不用把一百多種兵全部做好
     this.bakeProps();
     this.art.onChange((slot) => this.onArt(slot));
-    void this.art.loadAll();
-    void this.loadViewSprites();
+    // 2D 版的角色、建築、樹都用 public/sprites 切好的圖，不用 3D 模型；開場不去找 models/、art/ 的檔案
+    // （一百多個插槽、每個找 .glb／.png／.webp，幾乎都不存在）。開發者面板「重新載入」時才讀。
     void this.loadProjectiles();
     void this.loadBuildingArt();
     void this.loadTreeArt();
@@ -107,7 +126,8 @@ export class Renderer2D {
       let dirs: Sprite[];
       if (this.viewSprites[i]) {
         dirs = this.viewSprites[i]; // 設定圖的多視角（最優先）
-      } else if (art || k.model === 'sheep') {
+      } else if (art || (k.model === 'sheep' && !this.hasViews(i))) {
+        // 有設定圖的兵種在圖讀好前只放便宜的毛球佔位，不要再拍一次 3D（拍完馬上就被設定圖取代）
         const mesh = art
           ? new THREE.Mesh(art.geometry, art.material)
           : new THREE.Mesh(unitGeometry(k.model), this.mats.get(0xffffff, { vertexColors: true }).clone());
@@ -128,13 +148,23 @@ export class Renderer2D {
     });
   }
 
-  /**
-   * 讀 public/sprites/<插槽名>/front.png、front45.png、side.png、back45.png、back.png
-   * （至少要有 front），去背後當成 8 方向圖。有的話優先於 3D 模型。
-   */
-  private async loadViewSprites(bust = ''): Promise<void> {
-    const base = import.meta.env.BASE_URL + 'sprites/';
-    await Promise.all(UNIT_KINDS.map(async (k, i) => {
+  /** 這種兵有沒有設定圖插槽（public/sprites/<id>/） */
+  private hasViews(i: number): boolean {
+    return ART_SLOTS.some((s) => s.target.type === 'unit' && s.target.kind === i);
+  }
+
+  /** 第一次用到這種兵（畫在畫面上、或資訊列要頭像）：先放佔位圖，再去讀設定圖（public/sprites/<插槽名>/front.png…，去背後當 8 方向圖） */
+  private kindReady = new Uint8Array(UNIT_KINDS.length);
+  private ensureKind(i: number): void {
+    if (this.kindReady[i]) return;
+    this.kindReady[i] = 1;
+    this.bakeUnits(i);
+    void this.loadViewKind(i, '');
+  }
+
+  private async loadViewKind(i: number, bust: string): Promise<void> {
+    const base = import.meta.env.BASE_URL + 'sprites/', k = UNIT_KINDS[i];
+    {
       const slot = ART_SLOTS.find((s) => s.target.type === 'unit' && s.target.kind === i);
       if (!slot) return;
       const imgs = await Promise.all(VIEW_FILES.map((n) => loadImage(`${base}${slot.id}/${n}.png${bust}`)));
@@ -144,7 +174,6 @@ export class Renderer2D {
       if (!cut.front) return;
       this.viewSprites[i] = spritesFromViews(cut, slot.height * k.scale * HEIGHT_PX);
       this.bakeUnits(i);
-      console.info(`🖼️ ${slot.label}：用設定圖（${Object.keys(cut).join('、')}）當 8 方向圖`);
       // 縮球形態（刺球衛）：public/sprites/<id>_curl/
       if (k.skill?.type === 'curl') {
         const ci = await Promise.all(VIEW_FILES.map((n) => loadImage(`${base}${slot.id}_curl/${n}.png${bust}`)));
@@ -156,7 +185,7 @@ export class Renderer2D {
           this.curlFlash[i] = dirs.map((s) => tintSprite(s, '#ff4040', 0.45));
         }
       }
-    }));
+    }
   }
 
   private bakeProps(): void {
@@ -268,6 +297,8 @@ export class Renderer2D {
     const map = this.world.map;
     const hash = (i: number) => { const x = Math.sin(i * 12.9898) * 43758.5453; return x - Math.floor(x); };
     this.props = [];
+    const ncx = Math.ceil(map.w / CHUNK), ncy = Math.ceil(map.h / CHUNK);
+    this.propChunks = Array.from({ length: ncx * ncy }, () => []);
     for (let i = 0; i < map.tiles.length; i++) {
       const t = map.tiles[i];
       if (t !== Tile.Tree && t !== Tile.Rock) continue;
@@ -293,7 +324,11 @@ export class Renderer2D {
           list = this.rockGroups[zone < 0.55 ? 0 : zone < 0.9 ? 2 : 3];
         }
       }
-      this.props.push({ x, y, sprite: list[Math.floor(hash(i) * list.length)], scale: 0.8 + hash(i + 3) * 0.45, flip: hash(i + 4) > 0.5 });
+      let sprite = list[Math.floor(hash(i) * list.length)];
+      if (hash(i + 4) > 0.5) { let f = this.flipped.get(sprite); if (!f) { f = flipSprite(sprite); this.flipped.set(sprite, f); } sprite = f; }
+      const prop: Prop = { x, y, sx: (x - y) * (TILE_W / 2), sy: (x + y) * (TILE_H / 2), sprite, scale: 0.8 + hash(i + 3) * 0.45 };
+      this.props.push(prop);
+      this.propChunks[Math.floor((i / map.w) / CHUNK) * ncx + Math.floor((i % map.w) / CHUNK)].push(prop);
     }
   }
 
@@ -339,6 +374,7 @@ export class Renderer2D {
   // ---------------------------------------------------------------- 對外介面（和 3D 版相同）
   /** 單位頭像：面向鏡頭的那張圖（介面用）；還沒準備好回傳 null */
   portrait(kind: number): HTMLCanvasElement | null {
+    this.ensureKind(kind);
     return this.unitSprites[kind]?.[1]?.canvas ?? null;
   }
 
@@ -400,10 +436,13 @@ export class Renderer2D {
     const onScreen = (sx: number, sy: number, m: number) => sx > vx0 - m && sx < vx1 + m && sy > vy0 - m && sy < vy1 + m * 2;
 
     this.drawBoard(g, map.w, map.h);
-    // 地面
-    for (let cy = 0; cy < Math.ceil(map.h / CHUNK); cy++) for (let cx = 0; cx < Math.ceil(map.w / CHUNK); cx++) {
-      const [sx, sy] = toScreen(cx * CHUNK, cy * CHUNK);
+    // 地面（順便記下哪幾塊的樹和石頭可能在畫面上：上下多留一點，高的樹會伸出分塊）
+    const ncx = Math.ceil(map.w / CHUNK), visChunks: number[] = [];
+    for (let cy = 0; cy < Math.ceil(map.h / CHUNK); cy++) for (let cx = 0; cx < ncx; cx++) {
+      const sx = (cx - cy) * CHUNK * (TILE_W / 2), sy = (cx + cy) * CHUNK * (TILE_H / 2);
       const left = sx - (CHUNK * TILE_W) / 2;
+      if (left > vx1 + 80 || left + CHUNK * TILE_W < vx0 - 80 || sy > vy1 + 200 || sy + CHUNK * TILE_H < vy0 - 80) continue;
+      visChunks.push(cy * ncx + cx);
       if (left > vx1 || left + CHUNK * TILE_W < vx0 || sy > vy1 || sy + CHUNK * TILE_H < vy0) continue;
       g.drawImage(this.chunk(cx, cy), left, sy - 1);
     }
@@ -416,12 +455,11 @@ export class Renderer2D {
     this.drawDepositSel(g, false);
 
     // 收集要畫的東西，依「離鏡頭的遠近」（x+y）排序：後面的先畫
-    const items: { k: number; draw: () => void }[] = [];
+    this.dN = 0;
     const shadows: [number, number, number][] = [];
-    for (const p of this.props) {
-      const [sx, sy] = toScreen(p.x, p.y);
-      if (!onScreen(sx, sy, 80)) continue;
-      items.push({ k: p.x + p.y, draw: () => this.drawSprite(g, p.sprite, sx, sy, p.scale, p.flip) });
+    for (const c of visChunks) for (const p of this.propChunks[c]) {
+      if (!onScreen(p.sx, p.sy, 80)) continue;
+      this.pushDraw(p.x + p.y, p.sprite, p.sx, p.sy, p.scale, false, null);
     }
     for (const b of w.buildings) {
       const cx = b.tx + b.w / 2, cy = b.ty + b.h / 2, half = (b.w + b.h) / 4;
@@ -432,7 +470,7 @@ export class Renderer2D {
       shadows.push([sx, sy0, half * 1.1]);
       // 城門的圖是沿 x 方向（3×1）；轉成 1×3 時左右翻過來
       const flip = b.h > b.w;
-      items.push({ k: cx + cy + half * 0.6, draw: () => { this.drawSprite(g, sp, sx, sy, 1, flip); this.drawBar(g, b, sx, sy - sp.top - 8); } });
+      this.pushDraw(cx + cy + half * 0.6, sp, sx, sy, 1, flip, b);
     }
     const u = w.units, t = w.time, sel = this.unitSel;
     const bars: [number, number, number][] = [];
@@ -442,9 +480,10 @@ export class Renderer2D {
     for (let i = 0; i < u.hi; i++) {
       if (!u.alive[i]) continue;
       const x = u.px[i] + (u.x[i] - u.px[i]) * alpha, y = u.py[i] + (u.y[i] - u.py[i]) * alpha;
-      const [sx, sy] = toScreen(x, y);
+      const sx = (x - y) * (TILE_W / 2), sy = (x + y) * (TILE_H / 2);
       if (!onScreen(sx, sy, 40)) continue;
       const k = u.kind[i], kind = UNIT_KINDS[k];
+      this.ensureKind(k);
       // 真的在走路才跳：速度要夠快；我方還要有指令、在追敵人或離崗位夠遠（站著被推擠不算）
       const moving = u.vx[i] * u.vx[i] + u.vy[i] * u.vy[i] > 0.4 && (u.team[i] !== 0 || u.order[i] !== 0 || u.target[i] >= 0 ||
         (u.homeX[i] - u.x[i]) ** 2 + (u.homeY[i] - u.y[i]) ** 2 > 0.8);
@@ -462,8 +501,7 @@ export class Renderer2D {
       if (u.team[i] === 0 && w.isTrapped(i)) trapped.push([sx, sy - sp.top - 6]);
       if (u.bleedT[i] > 0) bleeding.push([sx, sy - sp.top * 0.55, i]);
       if (kind.skill?.type === 'rage' && w.raging(i)) rage.push([sx, sy, kind.radius * (w.deepRage(i) ? 2.2 : 1.6)]); // 深度狂化：紅光比較大
-      items.push({ k: x + y + (kind.flying ? 1.5 : kind.jumping ? 0.6 : 0), // 飛的畫在附近地面單位上面
-        draw: () => this.drawSprite(g, sp, sx, sy - bob * HEIGHT_PX, 1, false) });
+      this.pushDraw(x + y + (kind.flying ? 1.5 : kind.jumping ? 0.6 : 0), sp, sx, sy - bob * HEIGHT_PX, 1, false, null); // 飛的畫在附近地面單位上面
     }
     // 影子（壓扁的橢圓）先畫，所有東西都在影子上面；全部合成一條路徑一次填色（省很多次填色）
     g.fillStyle = 'rgba(60,40,30,0.22)';
@@ -480,9 +518,20 @@ export class Renderer2D {
       for (const [sx, sy, r] of rage) { g.moveTo(sx + r * PX_PER_UNIT, sy); g.ellipse(sx, sy, r * PX_PER_UNIT, r * PX_PER_UNIT * 0.5, 0, 0, Math.PI * 2); }
       g.fill();
     }
-    items.sort((a, b) => a.k - b.k);
-    for (const it of items) it.draw();
-    this.drawn = items.length;
+    // 依遠近排序（排索引，不搬資料）後畫
+    const n = this.dN;
+    if (this.dOrder.length < n) this.dOrder = new Int32Array(n * 2);
+    for (let q = 0; q < n; q++) this.dOrder[q] = q;
+    const K = this.dK, order = this.dOrder.subarray(0, n);
+    order.sort((a, b) => K[a] - K[b]);
+    for (let q = 0; q < n; q++) {
+      const d = order[q], s = this.dS[d], sx = this.dX[d], sy = this.dY[d];
+      this.drawSprite(g, s, sx, sy, this.dScale[d], this.dFlip[d] === 1);
+      const b = this.dB[d];
+      if (b) this.drawBar(g, b, sx, sy - s.top - 8);
+    }
+    for (let q = 0; q < n; q++) this.dB[q] = null; // 不要留著已經拆掉的建築
+    this.drawn = n;
 
     this.drawShots(g);
     this.drawFx(g);

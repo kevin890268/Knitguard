@@ -7,6 +7,11 @@ export class GameLoop {
   readonly dt = 1 / 30;
   timeScale = 1;
   paused = false;
+  /**
+   * 畫面最多每秒幾張（0＝不限）。高更新率螢幕（120／144Hz）不用每一下都重畫，省一半以上的繪圖負擔；
+   * 留 4ms 的寬容，60Hz 螢幕不會因為時間抖動而掉張
+   */
+  maxFps = 60;
   readonly stats = { fps: 0, simMs: 0, renderMs: 0, ticksPerFrame: 0 };
 
   private acc = 0;
@@ -31,6 +36,7 @@ export class GameLoop {
   }
 
   private frame = (now: number): void => {
+    if (this.maxFps > 0 && now - this.last < 1000 / this.maxFps - 4) { requestAnimationFrame(this.frame); return; }
     const frameDt = Math.min(0.1, (now - this.last) / 1000);
     this.last = now;
 

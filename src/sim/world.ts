@@ -1477,45 +1477,56 @@ export class World {
   // ---------------------------------------------------------------- 碰撞
   private resolveCollisions(): void {
     const u = this.units, hs = this.hash, cols = hs.cols, rows = hs.rows;
-    // 1) 單位之間互推（只比較附近 3x3 格）
-    for (let i = 0; i < u.hi; i++) {
-      if (!u.alive[i]) continue;
-      const c = hs.cellIndex(u.x[i], u.y[i]);
-      const cx = c % cols, cy = (c / cols) | 0;
-      const ri = u.rad[i], mi = ri * ri;
-      for (let yy = Math.max(0, cy - 1); yy <= Math.min(rows - 1, cy + 1); yy++) {
-        for (let xx = Math.max(0, cx - 1); xx <= Math.min(cols - 1, cx + 1); xx++) {
-          const cell = yy * cols + xx;
-          for (let p = hs.cellStart[cell], e = hs.cellStart[cell + 1]; p < e; p++) {
-            const j = hs.items[p];
-            if (j <= i || !u.alive[j]) continue;
-            if (LAYER[u.kind[i]] !== LAYER[u.kind[j]]) continue; // 會飛、會跳的從地面單位上面越過，不互推
-            let dx = u.x[j] - u.x[i], dy = u.y[j] - u.y[i];
-            const rj = u.rad[j], min = ri + rj;
+    // 熱迴圈：陣列先拿到區域變數（每一對都要讀很多次）
+    const X = u.x, Y = u.y, R = u.rad, alive = u.alive, kind = u.kind, start = hs.cellStart, items = hs.items;
+    const pushK = this.moveTuning.push;
+    // 1) 單位之間互推：照建表時的格子逐格走，每一對只比一次＝同一格裡排在後面的，加上「前方」4 格（右、左下、下、右下）裡的全部
+    //    （3x3 格每對會被兩邊各看一次；這樣少走一半。用建表時的格子，單位在這一輪被推動也不會重算或漏算）
+    const FWD = [1, 0, -1, 1, 0, 1, 1, 1];
+    for (let cy = 0; cy < rows; cy++) for (let cx = 0; cx < cols; cx++) {
+      const cell = cy * cols + cx, cs = start[cell], ce = start[cell + 1];
+      for (let p = cs; p < ce; p++) {
+        const i = items[p];
+        if (!alive[i]) continue;
+        const ri = R[i], mi = ri * ri, li = LAYER[kind[i]];
+        for (let f = -2; f < 8; f += 2) {
+          let qs: number, qe: number;
+          if (f < 0) { qs = p + 1; qe = ce; } // 同一格：排在後面的
+          else {
+            const xx = cx + FWD[f], yy = cy + FWD[f + 1];
+            if (xx < 0 || xx >= cols || yy >= rows) continue;
+            const nc = yy * cols + xx; qs = start[nc]; qe = start[nc + 1];
+          }
+          for (let q = qs; q < qe; q++) {
+            const j = items[q];
+            if (!alive[j] || li !== LAYER[kind[j]]) continue; // 會飛、會跳的從地面單位上面越過，不互推
+            let dx = X[j] - X[i], dy = Y[j] - Y[i];
+            const rj = R[j], min = ri + rj;
             let d2 = dx * dx + dy * dy;
             if (d2 >= min * min) continue;
             if (d2 < 1e-8) { dx = Math.random() - 0.5; dy = Math.random() - 0.5; d2 = dx * dx + dy * dy; }
             const d = Math.sqrt(d2);
             // 每 tick 只推開重疊的 40%（推太滿會在人群裡來回彈，看起來一直抖；0.8 時人群抖動約 4 倍）
-            const push = (min - d) * this.moveTuning.push;
+            const push = (min - d) * pushK;
             const nx = dx / d, ny = dy / d;
             const mj = rj * rj, wi = mj / (mi + mj); // 大隻的比較推不動
-            u.x[i] -= nx * push * wi; u.y[i] -= ny * push * wi;
-            u.x[j] += nx * push * (1 - wi); u.y[j] += ny * push * (1 - wi);
+            X[i] -= nx * push * wi; Y[i] -= ny * push * wi;
+            X[j] += nx * push * (1 - wi); Y[j] += ny * push * (1 - wi);
           }
         }
       }
     }
     // 2) 單位 vs 地形/建築（圓與方格）
-    const W = this.map.w, H = this.map.h;
+    const W = this.map.w, H = this.map.h, tiles = this.map.tiles, occ = this.occ;
     for (let i = 0; i < u.hi; i++) {
-      if (!u.alive[i]) continue;
-      const r = u.rad[i];
-      let x = u.x[i], y = u.y[i];
+      if (!alive[i]) continue;
+      const r = R[i];
+      let x = X[i], y = Y[i];
       const x0 = Math.floor(x - r), x1 = Math.floor(x + r), y0 = Math.floor(y - r), y1 = Math.floor(y + r);
       for (let ty = y0; ty <= y1; ty++) {
         for (let tx = x0; tx <= x1; tx++) {
-          if (!this.isSolid(tx, ty)) continue;
+          // 擋路的格子＝地圖外、不是草地、或有建築（和 isSolid 一樣，直接查陣列比較快）
+          if (tx >= 0 && ty >= 0 && tx < W && ty < H) { const ti = ty * W + tx; if (tiles[ti] === Tile.Grass && occ[ti] < 0) continue; }
           // 開著的城門：我方只被兩端各半格的塔擋住
           const gid = this.map.inBounds(tx, ty) ? this.occ[ty * W + tx] : -1;
           const gb = gid >= 0 ? this.byId.get(gid)! : null;
